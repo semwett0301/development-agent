@@ -24,7 +24,7 @@ services:
       context: .
       dockerfile: webhook-service/Dockerfile
     ports:
-      - "80:80"
+      - "8080:8080"
     environment:
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
@@ -37,7 +37,7 @@ services:
       context: .
       dockerfile: coding-agent/Dockerfile
     ports:
-      - "8080:8080"
+      - "8082:8082"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
