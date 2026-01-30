@@ -13,9 +13,17 @@ logger = logging.getLogger(__name__)
 
 
 class CodeGenerator:
-    def __init__(self, llm: BaseChatModel):
+    def __init__(self, llm: BaseChatModel, langfuse_callbacks: Optional[list] = None):
         self.llm = llm
+        self._langfuse_callbacks = langfuse_callbacks
+        self._generate_chain: Optional[Runnable] = None
         self._fix_chain: Optional[Runnable] = None
+
+    @property
+    def generate_chain(self) -> Runnable:
+        if self._generate_chain is None:
+            self._generate_chain = create_generate_chain(self.llm)
+        return self._generate_chain
 
     @property
     def fix_chain(self) -> Runnable:
@@ -25,7 +33,7 @@ class CodeGenerator:
 
     def generate_for_step(self, step: PlanStep, current_content: Optional[str], related_context: str, conventions: str, repo_path: Path) -> CodeChange:
         """Generate code changes for a plan step.
-
+        
         Input:
             step: The plan step to implement
             current_content: Current file content (None if creating)
@@ -35,6 +43,9 @@ class CodeGenerator:
         """
         logger.info(f"Generating code for step {step.id}: {step.description}")
         action_instructions = get_action_instructions(step.action.value)
+        invoke_kwargs = {}
+        if self._langfuse_callbacks:
+            invoke_kwargs["config"] = {"callbacks": self._langfuse_callbacks}
         result: CodeGenerationOutput = self.generate_chain.invoke({
             "step_description": step.description,
             "step_details": step.details or "No additional details",
@@ -44,12 +55,11 @@ class CodeGenerator:
             "related_context": related_context or "No related context available",
             "conventions": conventions,
             "action_instructions": action_instructions,
-        })
+        }, **invoke_kwargs)
 
         edit = FileEdit(
             file_path=result.file_path,
-            edit_type=EditType(
-                result.edit_type) if result.edit_type != "delete" else EditType.DELETE,
+            edit_type=EditType(result.edit_type) if result.edit_type != "delete" else EditType.DELETE,
             new_content=result.new_content,
             old_content=current_content,
         )
@@ -63,7 +73,7 @@ class CodeGenerator:
 
     def fix_errors(self, error_summary: str, lint_output: str, test_output: str, files_with_errors: list[str], file_contents: dict[str, str]) -> CodeFixesOutput:
         """Fix linter errors and test failures.
-
+        
         Input:
             error_summary: Summary of all errors
             lint_output: Raw lint command output
@@ -71,24 +81,28 @@ class CodeGenerator:
             files_with_errors: List of file paths with errors
             file_contents: Dict mapping file path to current content
         """
+        invoke_kwargs = {}
+        if self._langfuse_callbacks:
+            invoke_kwargs["config"] = {"callbacks": self._langfuse_callbacks}
+        formatted_contents = [f"### {path}\n```\n{content}\n```" for path, content in file_contents.items()]
         result: CodeFixesOutput = self.fix_chain.invoke({
             "error_summary": error_summary,
             "lint_output": lint_output or "No lint errors",
             "test_output": test_output or "No test failures",
             "files_with_errors": "\n".join(f"- {f}" for f in files_with_errors),
             "file_contents": "\n\n".join(formatted_contents),
-        })
+        }, **invoke_kwargs)
 
         return result
 
     def apply_changes(self, changes: CodeChange, repo_path: Path) -> list[str]:
         """
         Apply code changes to the repository.
-
+        
         Input:
             changes: The code changes to apply
             repo_path: Path to repository
-
+            
         Output:
             List of modified file paths
         """
@@ -96,7 +110,7 @@ class CodeGenerator:
 
         for edit in changes.edits:
             file_path = repo_path / edit.file_path
-
+            
             logger.info(f"Applying {edit.edit_type.value} to {edit.file_path}")
 
             if edit.edit_type == EditType.DELETE:
@@ -105,7 +119,7 @@ class CodeGenerator:
                     modified_files.append(edit.file_path)
             else:
                 file_path.parent.mkdir(parents=True, exist_ok=True)
-
+                
                 if edit.new_content is not None:
                     file_path.write_text(edit.new_content, encoding="utf-8")
                     modified_files.append(edit.file_path)
@@ -115,11 +129,11 @@ class CodeGenerator:
     def apply_fixes(self, fixes: CodeFixesOutput, repo_path: Path) -> list[str]:
         """
         Apply code fixes to the repository.
-
+        
         Input:
             fixes: The code fixes to apply
             repo_path: Path to repository
-
+            
         Output:
             List of modified file paths
         """
@@ -127,12 +141,11 @@ class CodeGenerator:
 
         for fix in fixes.fixes:
             file_path = repo_path / fix.file_path
-
-            logger.info(f"Applying fix to {fix.file_path}: {
-                        ', '.join(fix.issues_fixed)}")
+            
+            logger.info(f"Applying fix to {fix.file_path}: {', '.join(fix.issues_fixed)}")
 
             file_path.parent.mkdir(parents=True, exist_ok=True)
-
+            
             file_path.write_text(fix.new_content, encoding="utf-8")
             modified_files.append(fix.file_path)
 
@@ -141,10 +154,10 @@ class CodeGenerator:
     def get_project_conventions(self, repo_path: Path) -> str:
         """
         Extract project conventions from config files.
-
+        
         Input:
             repo_path: Path to repository
-
+            
         Output:
             Formatted conventions string
         """
@@ -155,7 +168,7 @@ class CodeGenerator:
             try:
                 content = pyproject.read_text()
                 conventions.append("## Python Project (pyproject.toml found)")
-
+                
                 if "[tool.ruff]" in content:
                     conventions.append("- Uses Ruff for linting")
                 if "[tool.black]" in content:
@@ -172,9 +185,8 @@ class CodeGenerator:
             try:
                 import json
                 content = json.loads(package_json.read_text())
-                conventions.append(
-                    "## JavaScript/TypeScript Project (package.json found)")
-
+                conventions.append("## JavaScript/TypeScript Project (package.json found)")
+                
                 deps = content.get("devDependencies", {})
                 if "eslint" in deps:
                     conventions.append("- Uses ESLint for linting")
@@ -198,8 +210,7 @@ class CodeGenerator:
             conventions.append("- Uses pre-commit hooks")
 
         if not conventions:
-            conventions.append(
-                "No specific conventions detected. Follow general best practices.")
+            conventions.append("No specific conventions detected. Follow general best practices.")
 
         return "\n".join(conventions)
 
@@ -235,10 +246,8 @@ class CodeGenerator:
                         for app in apps.iterdir():
                             if (app / "package.json").is_file():
                                 try:
-                                    app_pkg = json.loads(
-                                        (app / "package.json").read_text())
-                                    deps = {
-                                        **app_pkg.get("dependencies", {}), **app_pkg.get("devDependencies", {})}
+                                    app_pkg = json.loads((app / "package.json").read_text())
+                                    deps = {**app_pkg.get("dependencies", {}), **app_pkg.get("devDependencies", {})}
                                     if "react" in deps or "vite" in deps:
                                         stacks.append("React/Vite")
                                     elif "express" in deps or "fastify" in deps:

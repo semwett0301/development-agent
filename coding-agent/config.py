@@ -47,16 +47,37 @@ class ChromaConfig:
 
 
 @dataclass
+class LangfuseConfig:
+    """Langfuse observability configuration."""
+    public_key: Optional[str] = None
+    secret_key: Optional[str] = None
+    host: str = "https://cloud.langfuse.com"
+
+    def __post_init__(self):
+        if self.public_key is None:
+            self.public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+        if self.secret_key is None:
+            self.secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+        if self.host == "https://cloud.langfuse.com":
+            self.host = os.getenv("LANGFUSE_BASE_URL", self.host)
+
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.public_key and self.secret_key)
+
+
+@dataclass
 class AgentConfig:
     """Main agent configuration."""
     llm: LLMConfig = field(default_factory=LLMConfig)
     github: GitHubConfig = field(default_factory=GitHubConfig)
     chroma: ChromaConfig = field(default_factory=ChromaConfig)
-
+    langfuse: Optional[LangfuseConfig] = None
+    
     # Agent behavior settings
     max_fix_attempts: int = 3
     work_dir: str = "/tmp/coding_agent_workspaces"
-
+    
     # Config files to search for lint/test commands
     config_files: list[str] = field(default_factory=lambda: [
         "README.md",
@@ -72,6 +93,11 @@ class AgentConfig:
 
 def load_config() -> AgentConfig:
     """Load configuration from environment variables."""
+    langfuse = LangfuseConfig(
+        public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+        secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+        host=os.getenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com"),
+    )
     return AgentConfig(
         llm=LLMConfig(
             provider=os.getenv("LLM_PROVIDER", "anthropic"),
@@ -84,6 +110,7 @@ def load_config() -> AgentConfig:
             host=os.getenv("CHROMA_HOST", "localhost"),
             port=int(os.getenv("CHROMA_PORT", "8000")),
         ),
+        langfuse=langfuse if langfuse.is_configured else None,
         max_fix_attempts=int(os.getenv("MAX_FIX_ATTEMPTS", "3")),
         work_dir=os.getenv("WORK_DIR", "/tmp/coding_agent_workspaces"),
     )

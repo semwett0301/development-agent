@@ -25,14 +25,16 @@ logger = logging.getLogger(__name__)
 class IssueProcessor:
     """Process and analyze GitHub issues using LangChain."""
 
-    def __init__(self, llm: BaseChatModel):
+    def __init__(self, llm: BaseChatModel, langfuse_callbacks: Optional[list] = None):
         """
         Initialize the issue processor.
 
         Args:
             llm: LangChain chat model to use
+            langfuse_callbacks: Optional list of callbacks for Langfuse tracing
         """
         self.llm = llm
+        self._langfuse_callbacks = langfuse_callbacks
         self._summarize_chain: Optional[Runnable] = None
         self._plan_chain: Optional[Runnable] = None
 
@@ -53,21 +55,24 @@ class IssueProcessor:
     def summarize_issue(self, issue: Issue) -> IssueSummary:
         """
         Summarize an issue and extract requirements.
-
+        
         Args:
             issue: The GitHub issue to summarize
-
+            
         Returns:
             IssueSummary with extracted information
         """
         logger.info(f"Summarizing issue #{issue.number}: {issue.title}")
 
         # Invoke the chain with issue data
+        invoke_kwargs = {}
+        if self._langfuse_callbacks:
+            invoke_kwargs["config"] = {"callbacks": self._langfuse_callbacks}
         result: IssueSummaryOutput = self.summarize_chain.invoke({
             "title": issue.title,
             "body": issue.body or "No description provided",
             "labels": ", ".join(issue.labels) if issue.labels else "None",
-        })
+        }, **invoke_kwargs)
 
         # Convert LLM output to internal model
         return IssueSummary(
@@ -87,20 +92,22 @@ class IssueProcessor:
     ) -> ActionPlan:
         """
         Create an action plan for implementing the issue.
-
+        
         Args:
             summary: Summarized issue
             code_context: Relevant code snippets from RAG
             project_structure: Project file structure
             project_language: Detected language/stack (e.g. "TypeScript/JavaScript. Use .ts, .tsx")
-
+            
         Returns:
             ActionPlan with implementation steps
         """
-        logger.info(f"Creating action plan for issue #{
-                    summary.original_issue.number}")
+        logger.info(f"Creating action plan for issue #{summary.original_issue.number}")
 
         # Invoke the chain
+        invoke_kwargs = {}
+        if self._langfuse_callbacks:
+            invoke_kwargs["config"] = {"callbacks": self._langfuse_callbacks}
         result: ActionPlanOutput = self.plan_chain.invoke({
             "summary": summary.summary,
             "requirements": "\n".join(f"- {r}" for r in summary.requirements),
@@ -108,7 +115,7 @@ class IssueProcessor:
             "code_context": code_context or "No relevant code found",
             "project_structure": project_structure or "Structure not available",
             "project_language": project_language,
-        })
+        }, **invoke_kwargs)
 
         # Convert LLM output to internal models
         steps = []
@@ -135,11 +142,11 @@ class IssueProcessor:
     ) -> str:
         """
         Generate a conventional commit message.
-
+        
         Args:
             summary: Issue summary
             changes_description: Description of changes made
-
+            
         Returns:
             Formatted commit message
         """
@@ -158,12 +165,11 @@ class IssueProcessor:
             scope = f"({summary.affected_areas[0]})"
 
         # Create message
-        title = summary.summary[:50] if len(
-            summary.summary) > 50 else summary.summary
+        title = summary.summary[:50] if len(summary.summary) > 50 else summary.summary
         title = title.lower().replace(".", "")
 
         message = f"{commit_type}{scope}: {title}"
-
+        
         if changes_description:
             message += f"\n\n{changes_description}"
 
@@ -179,12 +185,12 @@ class IssueProcessor:
     ) -> str:
         """
         Generate a pull request description.
-
+        
         Args:
             summary: Issue summary
             plan: Executed action plan
             files_changed: List of changed file paths
-
+            
         Returns:
             Formatted PR description in markdown
         """
