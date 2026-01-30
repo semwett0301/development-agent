@@ -19,7 +19,6 @@ from .services import (
     GitService,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -69,11 +68,11 @@ class CodingAgent:
         self.git_service = GitService(self.github_client, self.config.work_dir)
 
     def process_issue(
-        self,
-        issue: Issue,
-        repo: str,
-        issue_number: int,
-        base_branch: str = "main",
+            self,
+            issue: Issue,
+            repo: str,
+            issue_number: int,
+            base_branch: str = "main",
     ) -> AgentResult:
         """Process a GitHub issue end-to-end."""
         logger.info(f"Processing issue #{issue_number}: {issue.title}")
@@ -201,7 +200,7 @@ class CodingAgent:
 
                 plan.mark_step_completed(step.id)
                 logger.info(f"Step {step.id} completed, changed: {
-                            files_changed}")
+                    files_changed}")
 
             except Exception as e:
                 logger.error(f"Step {step.id} failed: {e}")
@@ -215,7 +214,7 @@ class CodingAgent:
 
         for attempt in range(1, self.config.max_fix_attempts + 1):
             logger.info(f"Validation attempt {
-                        attempt}/{self.config.max_fix_attempts}")
+                attempt}/{self.config.max_fix_attempts}")
 
             result = self.validator.validate(repo_path, commands)
 
@@ -242,10 +241,10 @@ class CodingAgent:
 
 @observe()
 def run_agent(
-    repo: str,
-    issue_number: int,
-    base_branch: str = "main",
-    config: Optional[AgentConfig] = None,
+        repo: str,
+        issue_number: int,
+        base_branch: str = "main",
+        config: Optional[AgentConfig] = None,
 ) -> AgentResult:
     """
     Run the coding agent on a specific issue.
@@ -257,28 +256,19 @@ def run_agent(
         config: Optional agent configuration
     """
 
-    def _execute() -> AgentResult:
-        agent = CodingAgent(config)
+    agent = CodingAgent(config)
 
-        issue_data = agent.github_client.get_issue(repo, issue_number)
+    issue_data = agent.github_client.get_issue(repo, issue_number)
 
-        issue = Issue(
-            title=issue_data.title,
-            body=issue_data.body,
-            labels=issue_data.labels,
-        )
+    issue = Issue(
+        title=issue_data.title,
+        body=issue_data.body,
+        labels=issue_data.labels,
+    )
 
-        result = agent.process_issue(issue, repo, issue_number, base_branch)
+    result = agent.process_issue(issue, repo, issue_number, base_branch)
 
-        if agent.config.langfuse and agent.config.langfuse.is_configured:
-            flush_langfuse()
+    if agent.config.langfuse and agent.config.langfuse.is_configured:
+        flush_langfuse()
 
-        return result
-
-    try:
-        return observe(
-            name="coding_agent_run",
-            session_id=f"{repo}#{issue_number}",
-        )(_execute)()
-    except ImportError:
-        return _execute()
+    return result
