@@ -125,13 +125,16 @@ class Validator:
         if validation_result.success:
             return CodeFixesOutput(fixes=[], explanation="No errors to fix", unfixable=[])
 
-        # Get files with errors
+        # Get files with errors (skip "unknown" placeholder)
         error_files = set()
         for err in validation_result.lint_errors:
-            error_files.add(err.file_path)
-        for err in validation_result.test_errors:
-            if err.file_path:
+            if err.file_path and err.file_path != "unknown":
                 error_files.add(err.file_path)
+        for err in validation_result.test_errors:
+            if err.file_path and err.file_path != "unknown":
+                error_files.add(err.file_path)
+
+        logger.info(f"Files with errors: {error_files}")
 
         # Read current content of error files
         file_contents = {}
@@ -146,6 +149,25 @@ class Validator:
                         f"### {file_path}\n```\n{content}\n```")
                 except Exception as e:
                     logger.warning(f"Could not read {file_path}: {e}")
+            else:
+                logger.warning(f"File not found: {full_path}")
+
+        # If no file contents found, we can't generate fixes
+        if not formatted_contents:
+            logger.warning("No file contents available for fixing - cannot generate fixes")
+            # Try to extract useful info for unfixable list
+            unfixable_msgs = []
+            if validation_result.lint_output:
+                unfixable_msgs.append(f"Lint errors: {validation_result.lint_output[:500]}")
+            if validation_result.test_output:
+                unfixable_msgs.append(f"Test errors: {validation_result.test_output[:500]}")
+            return CodeFixesOutput(
+                fixes=[],
+                explanation="Could not locate files to fix",
+                unfixable=unfixable_msgs or ["Unknown error files"],
+            )
+
+        logger.info(f"Loaded {len(formatted_contents)} files for fixing")
 
         # Invoke the fix chain
         invoke_kwargs = {}
@@ -159,6 +181,7 @@ class Validator:
             "file_contents": "\n\n".join(formatted_contents),
         }, **invoke_kwargs)
 
+        logger.info(f"Fix chain returned {len(result.fixes)} fixes")
         return result
 
     def apply_fixes(self, fixes: CodeFixesOutput, repo_path: Path) -> list[str]:
@@ -191,6 +214,10 @@ class Validator:
 
     def _run_command(self, command: str, cwd: Path, timeout: int = 300) -> dict:
         """Run a shell command."""
+        import time
+        start_time = time.time()
+        logger.debug(f"Running command: {command} in {cwd}")
+
         try:
             result = subprocess.run(
                 command,
@@ -201,20 +228,29 @@ class Validator:
                 timeout=timeout,
             )
 
+            elapsed = time.time() - start_time
             output = result.stdout
             if result.stderr:
                 output += "\n" + result.stderr
+
+            logger.info(f"Command completed in {elapsed:.1f}s with exit code {result.returncode}")
+            if result.returncode != 0:
+                logger.debug(f"Command output (first 500 chars): {output[:500]}")
 
             return {
                 "returncode": result.returncode,
                 "output": output,
             }
         except subprocess.TimeoutExpired:
+            elapsed = time.time() - start_time
+            logger.error(f"Command timed out after {elapsed:.1f}s")
             return {
                 "returncode": -1,
                 "output": f"Command timed out after {timeout}s",
             }
         except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"Command failed after {elapsed:.1f}s: {e}")
             return {
                 "returncode": -1,
                 "output": str(e),
