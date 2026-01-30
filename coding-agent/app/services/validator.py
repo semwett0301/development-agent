@@ -271,7 +271,10 @@ class Validator:
 
     def _validate_with_docker(self, repo_path: Path, commands: ProjectCommands) -> Optional[ValidationResult]:
         """
-        Run validation inside Docker container.
+        Run validation inside a generic Docker container with mounted code.
+        
+        Instead of using project's docker-compose (which may have databases, etc.),
+        we create a simple container with just the tools needed for lint/test.
 
         Returns ValidationResult if Docker validation worked, None if should fallback.
         """
@@ -282,14 +285,115 @@ class Validator:
             logger.warning("Docker CLI not available")
             return None
 
+        # Use a generic validation container based on project type
+        return self._validate_with_generic_container(repo_path, commands)
+
+    def _get_docker_image_for_project(self, project_type: str) -> str:
+        """Get the appropriate Docker image for the project type."""
+        images = {
+            "javascript": "node:20-alpine",
+            "typescript": "node:20-alpine",
+            "python": "python:3.12-slim",
+            "go": "golang:1.22-alpine",
+            "rust": "rust:1.75-slim",
+        }
+        return images.get(project_type, "node:20-alpine")
+
+    def _validate_with_generic_container(self, repo_path: Path, commands: ProjectCommands) -> Optional[ValidationResult]:
+        """
+        Run validation in a generic container with mounted code.
+        
+        This approach:
+        1. Uses a standard image (node:20, python:3.12, etc.) based on project type
+        2. Mounts the repo code into /app
+        3. Installs dependencies and runs lint/test
+        """
         result = ValidationResult(success=True)
+        
+        project_type = commands.project_type or "javascript"
+        image = self._get_docker_image_for_project(project_type)
+        logger.info(f"Using generic container for validation: {image}")
 
-        if commands.has_docker_compose:
-            return self._validate_with_compose(repo_path, commands, result)
-        if commands.has_dockerfile:
-            return self._validate_with_dockerfile(repo_path, commands, result)
+        # Get install command and convert npm commands to correct package manager
+        install_cmd = self._get_install_command(project_type, repo_path)
+        lint_command = self._convert_npm_command(commands.lint_command, repo_path) if commands.lint_command else None
+        test_command = self._convert_npm_command(commands.test_command, repo_path) if commands.test_command else None
 
-        return None
+        # For pnpm/yarn we need to install them first in alpine
+        pm = self._detect_js_package_manager(repo_path)
+        pm_install = ""
+        if project_type in ("javascript", "typescript"):
+            if pm == "pnpm":
+                pm_install = "npm install -g pnpm && "
+            elif pm == "yarn":
+                pm_install = "npm install -g yarn && "
+
+        # Base docker run command with mounted volume
+        # Use absolute path for Windows compatibility
+        repo_path_str = str(repo_path).replace("\\", "/")
+        base_cmd = f'docker run --rm -v "{repo_path_str}:/app" -w /app {image}'
+
+        # Run lint if available
+        if lint_command:
+            if install_cmd:
+                full_cmd = f"{pm_install}{install_cmd} && {lint_command}"
+            else:
+                full_cmd = f"{pm_install}{lint_command}"
+            
+            logger.info(f"Running lint: {full_cmd}")
+            docker_cmd = f'{base_cmd} sh -c "{full_cmd}"'
+            lint_result = self._run_command(docker_cmd, repo_path, timeout=600)
+            result.lint_command = docker_cmd
+            result.lint_output = lint_result.get("output", "")
+
+            logger.info(f"Lint result: exit={lint_result['returncode']}, output_len={len(result.lint_output)}")
+            if lint_result["returncode"] != 0:
+                logger.warning(f"Lint output: {result.lint_output[:1000]}")
+                result.success = False
+                result.lint_errors = self._parse_lint_errors(
+                    result.lint_output, project_type)
+                logger.info(f"Parsed {len(result.lint_errors)} lint errors")
+                if not result.lint_errors:
+                    result.lint_errors = [LintError(
+                        file_path="unknown", line=0, column=0,
+                        message=f"Linter failed. Output: {result.lint_output[:500]}",
+                        rule="lint-failure",
+                    )]
+            else:
+                logger.info("Lint passed")
+
+        # Run tests if available
+        if test_command:
+            if install_cmd:
+                full_cmd = f"{pm_install}{install_cmd} && {test_command}"
+            else:
+                full_cmd = f"{pm_install}{test_command}"
+            
+            logger.info(f"Running tests: {full_cmd}")
+            docker_cmd = f'{base_cmd} sh -c "{full_cmd}"'
+            test_result = self._run_command(docker_cmd, repo_path, timeout=600)
+            result.test_command = docker_cmd
+            result.test_output = test_result.get("output", "")
+
+            logger.info(f"Test result: exit={test_result['returncode']}, output_len={len(result.test_output)}")
+            if test_result["returncode"] != 0:
+                logger.warning(f"Test output: {result.test_output[:1000]}")
+                result.success = False
+                result.test_errors = self._parse_test_errors(
+                    result.test_output, project_type)
+                logger.info(f"Parsed {len(result.test_errors)} test errors")
+                if not result.test_errors:
+                    result.test_errors = [TestError(
+                        test_name="unknown", file_path=None,
+                        message="Tests failed",
+                        traceback=result.test_output[-1500:],
+                    )]
+            else:
+                logger.info("Tests passed")
+
+        logger.info(f"Generic container validation complete: success={result.success}, "
+                    f"lint_errors={len(result.lint_errors)}, test_errors={len(result.test_errors)}")
+        return result
 
     def _validate_with_compose(self, repo_path: Path, commands: ProjectCommands, result: ValidationResult) -> Optional[ValidationResult]:
         """Run validation using docker-compose."""
