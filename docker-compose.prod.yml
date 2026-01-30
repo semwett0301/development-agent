@@ -1,8 +1,7 @@
 services:
   kafka:
     image: apache/kafka:4.0.0
-    ports:
-      - "9092:9092"
+    network_mode: host
     healthcheck:
       test: /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092
       interval: 5s
@@ -21,8 +20,7 @@ services:
 
   webhook-service:
     image: ${DOCKERHUB_USERNAME}/webhook-service:latest
-    ports:
-      - "8080:80"
+    network_mode: host
     environment:
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
@@ -32,8 +30,7 @@ services:
 
   coding-agent:
     image: ${DOCKERHUB_USERNAME}/coding-agent:latest
-    ports:
-      - "8082:80"
+    network_mode: host
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
@@ -48,8 +45,7 @@ services:
 
   reviewer-agent:
     image: ${DOCKERHUB_USERNAME}/reviewer-agent:latest
-    ports:
-      - "8083:80"
+    network_mode: host
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
@@ -61,7 +57,3 @@ services:
       kafka:
         condition: service_healthy
 
-networks:
-  default:
-    external: true
-    name: nat
