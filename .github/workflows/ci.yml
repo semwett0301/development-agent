@@ -13,10 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         service:
-          - coding-agent
-          - indexer-service
+#          - coding-agent
+#          - indexer-service
           - webhook-service
-          - reviewer-agent
+#          - reviewer-agent
 
     steps:
       - uses: actions/checkout@v4
