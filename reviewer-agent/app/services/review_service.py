@@ -18,6 +18,9 @@ from ..clients import (
     get_langfuse_callback,
     parse_coding_summary_from_pr_body,
     parse_issue_number_from_pr,
+    parse_review_count_from_pr_body,
+    update_review_count_in_body,
+    add_review_failed_message,
 )
 from ..chains import create_review_chain, create_errors_chain
 from ..embedding import embed, cosine_similarity
@@ -61,6 +64,9 @@ class ReviewService:
         self._review_chain = create_review_chain(self._llm)
         self._errors_chain = create_errors_chain(self._llm)
 
+    # Maximum review attempts before giving up
+    MAX_REVIEW_ATTEMPTS = 4
+
     def review_pr(self, owner: str, repo: str, pr_number: int) -> ReviewResult:
         """
         Run the full review pipeline for a pull request.
@@ -84,6 +90,11 @@ class ReviewService:
 
         ci_status = _format_ci_status(check_runs)
         ci_passed = _ci_passed(check_runs, self.config.ci_required)
+
+        # 2. Track review count
+        current_review_count = parse_review_count_from_pr_body(pr.body)
+        new_review_count = current_review_count + 1
+        logger.info(f"Review attempt #{new_review_count} for PR #{pr_number}")
 
         # 3. Review chain
         review_output = self._run_review_chain(
@@ -109,6 +120,37 @@ class ReviewService:
         # 6. If not normal, run errors chain
         errors = self._extract_errors(
             is_normal, issues_found, diff, check_runs) if not is_normal else []
+
+        # 7. Update PR description with review count
+        updated_body = update_review_count_in_body(pr.body, new_review_count)
+        
+        # 8. Handle based on result
+        if is_normal and ci_passed:
+            # Success! Approve the PR
+            logger.info(f"PR #{pr_number} passed review - approving")
+            self._github.update_pull_request(owner, repo, pr_number, updated_body)
+            self._github.approve_pull_request(
+                owner, repo, pr_number,
+                f"✅ Review passed! (attempt #{new_review_count})\n\n"
+                f"- CI: ✅ Passed\n"
+                f"- Requirements: ✅ Met\n"
+                f"- Summary similarity: {summary_similarity:.2f}"
+            )
+        elif new_review_count >= self.MAX_REVIEW_ATTEMPTS and not ci_passed:
+            # Max attempts reached, pipelines still failing
+            logger.warning(f"PR #{pr_number} failed after {new_review_count} attempts - giving up")
+            updated_body = add_review_failed_message(updated_body, self.MAX_REVIEW_ATTEMPTS)
+            self._github.update_pull_request(owner, repo, pr_number, updated_body)
+            self._github.request_changes(
+                owner, repo, pr_number,
+                f"❌ После {self.MAX_REVIEW_ATTEMPTS} попыток ревью пайплайны всё ещё падают.\n\n"
+                f"Требуется ручное вмешательство.\n\n"
+                f"**Ошибки CI:**\n{ci_status}"
+            )
+        else:
+            # Update count, continue trying
+            logger.info(f"PR #{pr_number} needs fixes (attempt #{new_review_count}/{self.MAX_REVIEW_ATTEMPTS})")
+            self._github.update_pull_request(owner, repo, pr_number, updated_body)
 
         return ReviewResult(
             is_normal=is_normal,
