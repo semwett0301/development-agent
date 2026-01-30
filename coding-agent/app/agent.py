@@ -212,6 +212,11 @@ class CodingAgent:
         """Run validation and fix errors with retries."""
         commands = self.config_finder.find_commands(repo_path)
 
+        # Install dependencies first
+        logger.info(f"Installing dependencies for {commands.project_type} project...")
+        if not self.validator.install_dependencies(repo_path, commands):
+            logger.warning("Dependency installation failed, continuing with validation anyway")
+
         for attempt in range(1, self.config.max_fix_attempts + 1):
             logger.info(f"Validation attempt {
                 attempt}/{self.config.max_fix_attempts}")

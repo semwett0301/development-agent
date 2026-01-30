@@ -112,11 +112,12 @@ class GitService:
 
         # Create PR
         pr = self.github.create_pull_request(
-            repo=repo,
+            owner=owner,
+            repo=repo_name,
             title=pr_title,
             body=pr_description,
-            head=branch_name,
-            base=base_branch,
+            head_branch=branch_name,
+            base_branch=base_branch,
         )
 
         logger.info(f"Created PR #{pr.number}: {pr.url}")

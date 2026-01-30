@@ -4,7 +4,6 @@ Chroma vector database client for the Coding Agent.
 import logging
 from dataclasses import dataclass
 from typing import Optional
-import chromadb
 
 from ..config import ChromaConfig
 
@@ -34,17 +33,11 @@ class ChromaClient:
         """Lazy initialization of Chroma client."""
         if self._client is None:
             try:
-                kwargs = {
-                    "host": self.config.host,
-                    "port": self.config.port,
-                }
-                if self.config.auth_token:
-                    from chromadb.config import Settings
-                    kwargs["settings"] = Settings(
-                        chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
-                        chroma_client_auth_credentials=self.config.auth_token,
-                    )
-                self._client = chromadb.HttpClient(**kwargs)
+                import chromadb
+                self._client = chromadb.HttpClient(
+                    host=self.config.host,
+                    port=self.config.port,
+                )
             except ImportError:
                 raise ImportError(
                     "chromadb not installed. Run: pip install chromadb"

@@ -56,7 +56,6 @@ class ChromaConfig:
     host: str = "localhost"
     port: int = 8000
     collection_name: str = "codebase"
-    auth_token: Optional[str] = None
 
     @property
     def url(self) -> str:
@@ -124,8 +123,6 @@ def load_config() -> AgentConfig:
         chroma=ChromaConfig(
             host=os.getenv("CHROMA_HOST", "localhost"),
             port=int(os.getenv("CHROMA_PORT", "8000")),
-            collection_name=os.getenv("CHROMA_COLLECTION_NAME", "codebase"),
-            auth_token=os.getenv("CHROMA_AUTH_TOKEN"),
         ),
         langfuse=langfuse if langfuse.is_configured else None,
         max_fix_attempts=int(os.getenv("MAX_FIX_ATTEMPTS", "3")),

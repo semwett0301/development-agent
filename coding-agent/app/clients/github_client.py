@@ -6,10 +6,7 @@ Uses GitHub App authentication with automatic token refresh.
 import logging
 from dataclasses import dataclass
 
-from pathlib import Path
-
 import httpx
-from git import Repo
 
 from ..config import GitHubAppConfig
 from shared.github import GitHubAppTokenManager
@@ -58,7 +55,7 @@ class GitHubClient:
             Issue object with title, body, labels
         """
         import asyncio
-        token = asyncio.run(
+        token = asyncio.get_event_loop().run_until_complete(
             self._token_manager.get_token_for_repo(repo)
         )
 
@@ -100,7 +97,7 @@ class GitHubClient:
             PullRequest object
         """
         import asyncio
-        token = asyncio.run(
+        token = asyncio.get_event_loop().run_until_complete(
             self._token_manager.get_token_for_repo(repo)
         )
 
@@ -132,7 +129,7 @@ class GitHubClient:
     def add_comment(self, repo: str, issue_number: int, body: str) -> dict:
         """Add a comment to an issue or PR."""
         import asyncio
-        token = asyncio.run(
+        token = asyncio.get_event_loop().run_until_complete(
             self._token_manager.get_token_for_repo(repo)
         )
 
@@ -148,46 +145,7 @@ class GitHubClient:
     def get_clone_url(self, repo: str) -> str:
         """Get the authenticated clone URL for a repository."""
         import asyncio
-        token = asyncio.run(
+        token = asyncio.get_event_loop().run_until_complete(
             self._token_manager.get_token_for_repo(repo)
         )
         return f"https://x-access-token:{token}@github.com/{repo}.git"
-
-    def clone_repository(self, owner: str, repo: str, target_dir: Path, branch: str = "main") -> Path:
-        """Clone a repository or pull latest if it already exists."""
-        full_repo = f"{owner}/{repo}"
-        repo_path = Path(target_dir) / repo
-
-        if repo_path.exists():
-            logger.info(f"Repository already exists at {
-                        repo_path}, pulling latest")
-            git_repo = Repo(repo_path)
-            git_repo.remotes.origin.pull(branch)
-        else:
-            clone_url = self.get_clone_url(full_repo)
-            logger.info(f"Cloning {full_repo} into {repo_path}")
-            Repo.clone_from(clone_url, repo_path, branch=branch)
-
-        return repo_path
-
-    def create_branch(self, repo_path: Path, branch_name: str) -> None:
-        """Create and checkout a new branch."""
-        git_repo = Repo(repo_path)
-        git_repo.git.checkout("-b", branch_name)
-        logger.info(f"Created and checked out branch: {branch_name}")
-
-    def commit_changes(self, repo_path: Path, message: str, files: list[str] | None = None) -> None:
-        """Stage and commit changes."""
-        git_repo = Repo(repo_path)
-        if files:
-            git_repo.index.add(files)
-        else:
-            git_repo.git.add("-A")
-        git_repo.index.commit(message)
-        logger.info(f"Committed: {message}")
-
-    def push_branch(self, repo_path: Path, branch_name: str) -> None:
-        """Push a branch to the remote."""
-        git_repo = Repo(repo_path)
-        git_repo.remotes.origin.push(branch_name)
-        logger.info(f"Pushed branch: {branch_name}")

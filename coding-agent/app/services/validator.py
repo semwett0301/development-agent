@@ -42,6 +42,38 @@ class Validator:
             self._fix_chain = create_fix_chain(self.llm)
         return self._fix_chain
 
+    def install_dependencies(self, repo_path: Path, commands: Optional[ProjectCommands] = None) -> bool:
+        """
+        Install project dependencies before validation.
+
+        Input:
+            repo_path: Path to repository
+            commands: Pre-discovered project commands (optional)
+
+        Output:
+            True if installation succeeded or skipped, False if failed
+        """
+        if commands is None:
+            commands = self.config_finder.find_commands(repo_path)
+
+        if not commands.install_command:
+            logger.info("No install command found, skipping dependency installation")
+            return True
+
+        logger.info(f"Installing dependencies: {commands.install_command}")
+        result = self._run_command(commands.install_command, repo_path, timeout=600)
+
+        if result["returncode"] == 0:
+            logger.info("Dependencies installed successfully")
+            return True
+        elif result["returncode"] == 127:
+            logger.warning(f"Install command not found (exit 127): {commands.install_command}")
+            return True  # Skip, don't fail
+        else:
+            logger.error(f"Dependency installation failed with exit code {result['returncode']}")
+            logger.debug(f"Install output: {result['output'][:1000]}")
+            return False
+
     def validate(self, repo_path: Path, commands: Optional[ProjectCommands] = None) -> ValidationResult:
         """
         Run linter and tests on the repository.
@@ -73,14 +105,12 @@ class Validator:
                 )
                 # Fallback: if command failed but no errors parsed, add generic error
                 if not result.lint_errors:
-                    output_snippet = result.lint_output[:500] if result.lint_output.strip(
-                    ) else "(no output)"
+                    output_snippet = result.lint_output[:500] if result.lint_output.strip() else "(no output)"
                     result.lint_errors = [LintError(
                         file_path="unknown",
                         line=0,
                         column=0,
-                        message=f"Linter failed with exit code {
-                            lint_result['returncode']}. Output: {output_snippet}",
+                        message=f"Linter failed with exit code {lint_result['returncode']}. Output: {output_snippet}",
                         rule="lint-failure",
                     )]
         else:
@@ -101,13 +131,11 @@ class Validator:
                 )
                 # Fallback: if command failed but no errors parsed, add generic error
                 if not result.test_errors:
-                    traceback = result.test_output[-1500:] if result.test_output.strip(
-                    ) else "(no output)"
+                    traceback = result.test_output[-1500:] if result.test_output.strip() else "(no output)"
                     result.test_errors = [TestError(
                         test_name="unknown",
                         file_path=None,
-                        message=f"Tests failed with exit code {
-                            test_result['returncode']}",
+                        message=f"Tests failed with exit code {test_result['returncode']}",
                         traceback=traceback,
                     )]
         else:
@@ -158,16 +186,13 @@ class Validator:
 
         # If no file contents found, we can't generate fixes
         if not formatted_contents:
-            logger.warning(
-                "No file contents available for fixing - cannot generate fixes")
+            logger.warning("No file contents available for fixing - cannot generate fixes")
             # Try to extract useful info for unfixable list
             unfixable_msgs = []
             if validation_result.lint_output:
-                unfixable_msgs.append(
-                    f"Lint errors: {validation_result.lint_output[:500]}")
+                unfixable_msgs.append(f"Lint errors: {validation_result.lint_output[:500]}")
             if validation_result.test_output:
-                unfixable_msgs.append(
-                    f"Test errors: {validation_result.test_output[:500]}")
+                unfixable_msgs.append(f"Test errors: {validation_result.test_output[:500]}")
             return CodeFixesOutput(
                 fixes=[],
                 explanation="Could not locate files to fix",
@@ -240,11 +265,9 @@ class Validator:
             if result.stderr:
                 output += "\n" + result.stderr
 
-            logger.info(f"Command completed in {
-                        elapsed:.1f}s with exit code {result.returncode}")
+            logger.info(f"Command completed in {elapsed:.1f}s with exit code {result.returncode}")
             if result.returncode != 0:
-                logger.debug(f"Command output (first 500 chars): {
-                             output[:500]}")
+                logger.debug(f"Command output (first 500 chars): {output[:500]}")
 
             return {
                 "returncode": result.returncode,
