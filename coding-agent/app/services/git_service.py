@@ -57,6 +57,40 @@ class GitService:
                     repo_path}, branch: {branch_name}")
         return repo_path
 
+    def setup_repository_for_pr(self, repo: str, pr_number: int) -> Path:
+        """
+        Clone repository and checkout the PR's head branch (for REDO).
+
+        Input:
+            repo: Repository in "owner/repo" format
+            pr_number: Pull request number
+
+        Output:
+            Path to the repository
+        """
+        owner, repo_name = repo.split("/")
+        pr_info = self.github.get_pull_request(repo, pr_number)
+        head_ref = pr_info.head_ref
+
+        repo_path = self.github.clone_repository(
+            owner=owner,
+            repo=repo_name,
+            target_dir=self.work_dir,
+            branch=head_ref,
+        )
+        self._current_branch_name = head_ref
+        logger.info(
+            f"Repository setup for PR #{pr_number} at {repo_path}, branch: {head_ref}"
+        )
+        return repo_path
+
+    def push_current_branch(self, repo_path: Path) -> None:
+        """Push the current branch to origin (no PR creation)."""
+        if not self._current_branch_name:
+            raise RuntimeError("No current branch set")
+        self.github.push_branch(repo_path, self._current_branch_name)
+        logger.info(f"Pushed branch: {self._current_branch_name}")
+
     def commit_all_changes(self, repo_path: Path, message: str, files: Optional[list[str]] = None) -> None:
         """
         Commit all changes to the repository.

@@ -34,6 +34,21 @@ async def consume_events(consumer: AIOKafkaConsumer):
                             run_agent_async(event.repository,
                                             event.issue_number)
                         )
+                    elif event.type == "REDO":
+                        if event.pull_request_number is None:
+                            logger.error(
+                                "REDO event missing pull_request_number, skipping"
+                            )
+                        else:
+                            await asyncio.create_task(
+                                run_agent_async(
+                                    event.repository,
+                                    event.issue_number,
+                                    pull_request_number=event.pull_request_number,
+                                )
+                            )
+                    else:
+                        logger.error(f"Invalid event type: {event.type}")
 
                 except Exception as e:
                     logger.error(f"Failed to process message: {e}")
@@ -43,14 +58,26 @@ async def consume_events(consumer: AIOKafkaConsumer):
             await asyncio.sleep(5)
 
 
-async def run_agent_async(repo: str, issue_number: int):
-    """Run the coding agent asynchronously."""
-    logger.info(f"Starting agent for {repo} issue #{issue_number}")
+async def run_agent_async(
+    repo: str,
+    issue_number: int,
+    pull_request_number: int | None = None,
+):
+    """Run the coding agent asynchronously (START or REDO)."""
+    mode = "REDO" if pull_request_number is not None else "START"
+    logger.info(
+        f"Starting agent for {repo} issue #{issue_number} ({mode}"
+        + (f", PR #{pull_request_number})" if pull_request_number else ")")
+    )
     try:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: run_agent(repo=repo, issue_number=issue_number)
+            lambda: run_agent(
+                repo=repo,
+                issue_number=issue_number,
+                pull_request_number=pull_request_number,
+            )
         )
 
         if result.success:

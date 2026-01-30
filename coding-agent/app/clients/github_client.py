@@ -27,6 +27,15 @@ class PullRequest:
     state: str = "open"
 
 
+@dataclass
+class PullRequestInfo:
+    """PR metadata for checkout (head branch, base branch)."""
+    number: int
+    head_ref: str  # branch name
+    base_ref: str
+    title: str
+
+
 class GitHubClient:
     """Client for interacting with GitHub API using GitHub App authentication."""
 
@@ -76,6 +85,34 @@ class GitHubClient:
             title=data["title"],
             body=data.get("body", ""),
             labels=[label["name"] for label in data.get("labels", [])],
+        )
+
+    def get_pull_request(self, repo: str, pull_number: int) -> "PullRequestInfo":
+        """
+        Fetch a pull request (head/base refs for checkout).
+
+        Args:
+            repo: Repository in "owner/repo" format
+            pull_number: PR number
+
+        Returns:
+            PullRequestInfo with head_ref, base_ref
+        """
+        import asyncio
+        token = asyncio.run(
+            self._token_manager.get_token_for_repo(repo)
+        )
+        url = f"{self.base_url}/repos/{repo}/pulls/{pull_number}"
+        logger.debug(f"Fetching PR: {url}")
+        with httpx.Client() as client:
+            response = client.get(url, headers=self._get_headers(token))
+            response.raise_for_status()
+        data = response.json()
+        return PullRequestInfo(
+            number=data["number"],
+            head_ref=data["head"]["ref"],
+            base_ref=data["base"]["ref"],
+            title=data.get("title", ""),
         )
 
     def clone_repository(
