@@ -34,7 +34,7 @@ async def test_issue_created_sends_to_coding_events(client, mock_send):
         "issue": {"body": "Fix the bug"},
     }).encode()
 
-    response = await client.post("/", content=payload, headers=_headers("issues", payload))
+    response = await client.post("/github/webhook", content=payload, headers=_headers("issues", payload))
 
     assert response.status_code == 200
     assert response.json() == {"event": "issues",
@@ -52,7 +52,7 @@ async def test_issue_created_sends_to_coding_events(client, mock_send):
 async def test_push_to_main_sends_to_index_events(client, mock_send):
     payload = json.dumps({"ref": "refs/heads/main"}).encode()
 
-    response = await client.post("/", content=payload, headers=_headers("push", payload))
+    response = await client.post("/github/webhook", content=payload, headers=_headers("push", payload))
 
     assert response.status_code == 200
 
@@ -65,7 +65,7 @@ async def test_push_to_main_sends_to_index_events(client, mock_send):
 async def test_push_to_non_main_does_not_send(client, mock_send):
     payload = json.dumps({"ref": "refs/heads/feature"}).encode()
 
-    response = await client.post("/", content=payload, headers=_headers("push", payload))
+    response = await client.post("/github/webhook", content=payload, headers=_headers("push", payload))
 
     assert response.status_code == 200
     mock_send.assert_not_called()
@@ -74,7 +74,7 @@ async def test_push_to_non_main_does_not_send(client, mock_send):
 async def test_unhandled_event_does_not_send(client, mock_send):
     payload = json.dumps({"action": "completed"}).encode()
 
-    response = await client.post("/", content=payload, headers=_headers("check_run", payload))
+    response = await client.post("/github/webhook", content=payload, headers=_headers("check_run", payload))
 
     assert response.status_code == 200
     mock_send.assert_not_called()
@@ -88,7 +88,7 @@ async def test_invalid_signature_returns_403(client, mock_send):
         "x-github-delivery": "test-delivery-id",
     }
 
-    response = await client.post("/", content=payload, headers=headers)
+    response = await client.post("/github/webhook", content=payload, headers=headers)
 
     assert response.status_code == 403
     mock_send.assert_not_called()
@@ -100,7 +100,7 @@ async def test_issue_with_null_body(client, mock_send):
         "issue": {"body": None},
     }).encode()
 
-    response = await client.post("/", content=payload, headers=_headers("issues", payload))
+    response = await client.post("/github/webhook", content=payload, headers=_headers("issues", payload))
 
     assert response.status_code == 200
     mock_send.assert_called_once()
