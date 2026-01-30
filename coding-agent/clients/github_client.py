@@ -33,7 +33,7 @@ class GitHubClient:
             self._session.headers["Authorization"] = f"token {config.token}"
         self._session.headers["Accept"] = "application/vnd.github.v3+json"
 
-    def get_issue(self, owner: str, repo: str, issue_number: int) -> dict:
+    def get_issue(self, owner: str, repo: str, issue_number: int):
         """
         Fetch an issue from GitHub.
 
@@ -43,7 +43,7 @@ class GitHubClient:
             issue_number: Issue number
 
         Returns:
-            Issue data as dictionary
+            Issue object with title, body, labels
         """
         url = f"{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}"
         logger.debug(f"Fetching issue: {url}")
@@ -56,25 +56,12 @@ class GitHubClient:
         # Convert to Issue model format
         from ..models import Issue
         return Issue(
-            id=data["id"],
-            number=data["number"],
             title=data["title"],
             body=data.get("body", ""),
-            repo_owner=owner,
-            repo_name=repo,
             labels=[l["name"] for l in data.get("labels", [])],
-            url=data.get("html_url"),
         )
 
-    def create_pull_request(
-        self,
-        owner: str,
-        repo: str,
-        title: str,
-        body: str,
-        head: str,
-        base: str = "main",
-    ) -> PullRequest:
+    def create_pull_request(self, owner: str, repo: str, title: str, body: str, head: str, base: str = "main") -> PullRequest:
         """
         Create a pull request.
 

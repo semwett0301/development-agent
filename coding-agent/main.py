@@ -38,6 +38,8 @@ class AgentResult:
     """Result of agent execution."""
     success: bool
     issue: Issue
+    repo: str
+    issue_number: int
     summary: Optional[IssueSummary] = None
     plan: Optional[ActionPlan] = None
     pull_request: Optional[PullRequest] = None
@@ -91,26 +93,42 @@ class CodingAgent:
             llm, self.config_finder, langfuse_callbacks=langfuse_callbacks)
         self.git_service = GitService(self.github_client, self.config.work_dir)
 
-    def process_issue(self, issue: Issue, base_branch: str = "main") -> AgentResult:
+    def process_issue(
+        self,
+        issue: Issue,
+        repo: str,
+        issue_number: int,
+        base_branch: str = "main",
+    ) -> AgentResult:
         """
         Process a GitHub issue end-to-end.
 
         Input:
-            issue: The issue to process
+            issue: The issue to process (title, body, labels)
+            repo: Repository in "owner/repo" format
+            issue_number: Issue number for PR linking
             base_branch: Branch to base changes on
 
         Output:
             AgentResult with execution details
         """
-        logger.info(f"Processing issue #{issue.number}: {issue.title}")
+        logger.info(f"Processing issue #{issue_number}: {issue.title}")
 
-        result = AgentResult(success=False, issue=issue)
+        # Extract repo_name from "owner/repo" format
+        repo_name = repo.split("/")[1]
+
+        result = AgentResult(success=False, issue=issue, repo=repo, issue_number=issue_number)
         repo_path = None
 
         try:
             # Step 1: Setup repository
             logger.info("Step 1: Setting up repository...")
-            repo_path = self.git_service.setup_repository(issue, base_branch)
+            repo_path = self.git_service.setup_repository(
+                repo=repo,
+                issue_number=issue_number,
+                title=issue.title,
+                base_branch=base_branch,
+            )
 
             # Step 2: Summarize issue
             logger.info("Step 2: Summarizing issue...")
@@ -122,7 +140,7 @@ class CodingAgent:
             logger.info("Step 3: Searching for relevant code...")
             search_results = self.code_search.search_for_issue(
                 summary=summary,
-                repo_name=issue.repo_name,
+                repo_name=repo_name,
             )
             code_context = self.code_search.build_context(search_results)
             project_structure = self.code_search.get_project_structure(
@@ -146,7 +164,7 @@ class CodingAgent:
             files_changed = self._execute_plan(
                 plan=plan,
                 repo_path=repo_path,
-                issue=issue,
+                repo_name=repo_name,
             )
             result.files_changed = files_changed
 
@@ -164,6 +182,7 @@ class CodingAgent:
             commit_message = self.issue_processor.create_commit_message(
                 summary=summary,
                 changes_description=f"Changed {len(files_changed)} files",
+                issue_number=issue_number,
             )
             self.git_service.commit_all_changes(
                 repo_path=repo_path,
@@ -173,7 +192,8 @@ class CodingAgent:
             # Step 8: Push and create PR
             logger.info("Step 8: Creating pull request...")
             pr = self.git_service.push_and_create_pr(
-                issue=issue,
+                repo=repo,
+                issue_number=issue_number,
                 summary=summary,
                 plan=plan,
                 files_changed=files_changed,
@@ -191,7 +211,7 @@ class CodingAgent:
             result.error = str(e)
             return result
 
-    def _execute_plan(self, plan: ActionPlan, repo_path: Path, issue: Issue) -> list[str]:
+    def _execute_plan(self, plan: ActionPlan, repo_path: Path, repo_name: str) -> list[str]:
         """Execute all steps in the action plan."""
         all_files_changed = []
         conventions = self.code_generator.get_project_conventions(repo_path)
@@ -210,7 +230,7 @@ class CodingAgent:
                 # Search for related code
                 related_results = self.code_search.search_for_step(
                     step=step,
-                    repo_name=issue.repo_name,
+                    repo_name=repo_name,
                 )
                 related_context = self.code_search.build_context(
                     related_results)
@@ -286,18 +306,20 @@ class CodingAgent:
         issue_data = payload.get("issue", payload)
         repo_data = payload.get("repository", {})
 
+        # Extract repo and issue_number
+        repo_owner = repo_data.get("owner", {}).get("login", "")
+        repo_name = repo_data.get("name", "")
+        repo = f"{repo_owner}/{repo_name}"
+        issue_number = issue_data.get("number", 0)
+
+        # Create simplified Issue
         issue = Issue(
-            id=issue_data.get("id", 0),
-            number=issue_data.get("number", 0),
             title=issue_data.get("title", ""),
             body=issue_data.get("body", ""),
-            repo_owner=repo_data.get("owner", {}).get("login", ""),
-            repo_name=repo_data.get("name", ""),
             labels=[l.get("name", "") for l in issue_data.get("labels", [])],
-            url=issue_data.get("html_url"),
         )
 
-        return self.process_issue(issue, base_branch)
+        return self.process_issue(issue, repo, issue_number, base_branch)
 
 
 def _observe_if_available(fn):
@@ -311,13 +333,17 @@ def _observe_if_available(fn):
 
 # Convenience function for direct execution
 @_observe_if_available
-def run_agent(owner: str, repo: str, issue_number: int, base_branch: str = "main", config: Optional[AgentConfig] = None) -> AgentResult:
+def run_agent(
+    repo: str,
+    issue_number: int,
+    base_branch: str = "main",
+    config: Optional[AgentConfig] = None,
+) -> AgentResult:
     """
     Run the coding agent on a specific issue.
 
     Input:
-        owner: Repository owner
-        repo: Repository name
+        repo: Repository in "owner/repo" format
         issue_number: Issue number to process
         base_branch: Branch to base changes on
         config: Optional agent configuration
@@ -327,10 +353,18 @@ def run_agent(owner: str, repo: str, issue_number: int, base_branch: str = "main
     """
     agent = CodingAgent(config)
 
-    # Fetch issue from GitHub
-    issue = agent.github_client.get_issue(owner, repo, issue_number)
+    # Fetch issue from GitHub (only title, body, labels)
+    owner, repo_name = repo.split("/")
+    issue_data = agent.github_client.get_issue(owner, repo_name, issue_number)
 
-    result = agent.process_issue(issue, base_branch)
+    # Create simplified Issue
+    issue = Issue(
+        title=issue_data.title,
+        body=issue_data.body,
+        labels=issue_data.labels,
+    )
+
+    result = agent.process_issue(issue, repo, issue_number, base_branch)
     # Flush Langfuse in short-lived runs so traces appear in the dashboard
     if agent.config.langfuse and agent.config.langfuse.is_configured:
         flush_langfuse()
@@ -341,16 +375,13 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Run the Coding Agent")
-    parser.add_argument("--owner", required=True, help="Repository owner")
-    parser.add_argument("--repo", required=True, help="Repository name")
-    parser.add_argument("--issue", type=int,
-                        required=True, help="Issue number")
+    parser.add_argument("--repo", required=True, help="Repository (owner/repo)")
+    parser.add_argument("--issue", type=int, required=True, help="Issue number")
     parser.add_argument("--branch", default="main", help="Base branch")
 
     args = parser.parse_args()
 
     result = run_agent(
-        owner=args.owner,
         repo=args.repo,
         issue_number=args.issue,
         base_branch=args.branch,

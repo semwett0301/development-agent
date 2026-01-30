@@ -57,12 +57,12 @@ class IssueProcessor:
         Summarize an issue and extract requirements.
 
         Args:
-            issue: The GitHub issue to summarize
+            issue: The GitHub issue to summarize (title, body, labels)
 
         Returns:
             IssueSummary with extracted information
         """
-        logger.info(f"Summarizing issue #{issue.number}: {issue.title}")
+        logger.info(f"Summarizing issue: {issue.title}")
 
         # Invoke the chain with issue data
         invoke_kwargs = {}
@@ -102,8 +102,7 @@ class IssueProcessor:
         Returns:
             ActionPlan with implementation steps
         """
-        logger.info(f"Creating action plan for issue #{
-                    summary.original_issue.number}")
+        logger.info(f"Creating action plan for: {summary.original_issue.title}")
 
         # Invoke the chain
         invoke_kwargs = {}
@@ -140,6 +139,7 @@ class IssueProcessor:
         self,
         summary: IssueSummary,
         changes_description: str,
+        issue_number: int,
     ) -> str:
         """
         Generate a conventional commit message.
@@ -147,6 +147,7 @@ class IssueProcessor:
         Args:
             summary: Issue summary
             changes_description: Description of changes made
+            issue_number: Issue number for "Closes #N" reference
 
         Returns:
             Formatted commit message
@@ -175,7 +176,7 @@ class IssueProcessor:
         if changes_description:
             message += f"\n\n{changes_description}"
 
-        message += f"\n\nCloses #{summary.original_issue.number}"
+        message += f"\n\nCloses #{issue_number}"
 
         return message
 
@@ -184,6 +185,7 @@ class IssueProcessor:
         summary: IssueSummary,
         plan: ActionPlan,
         files_changed: list[str],
+        issue_number: int,
     ) -> str:
         """
         Generate a pull request description.
@@ -192,6 +194,7 @@ class IssueProcessor:
             summary: Issue summary
             plan: Executed action plan
             files_changed: List of changed file paths
+            issue_number: Issue number for "Closes #N" reference
 
         Returns:
             Formatted PR description in markdown
@@ -218,10 +221,7 @@ class IssueProcessor:
 
         # Related issue
         sections.append("## Related Issue")
-        issue = summary.original_issue
-        sections.append(f"Closes #{issue.number}")
-        if issue.url:
-            sections.append(f"Issue: {issue.url}")
+        sections.append(f"Closes #{issue_number}")
         sections.append("")
 
         # Checklist

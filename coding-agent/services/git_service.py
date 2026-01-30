@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..clients import GitHubClient, PullRequest
-from ..models import Issue, IssueSummary, ActionPlan
+from ..models import IssueSummary, ActionPlan
 
 logger = logging.getLogger(__name__)
 
@@ -15,32 +15,44 @@ class GitService:
         self.github = github_client
         self.work_dir = Path(work_dir)
         self.work_dir.mkdir(parents=True, exist_ok=True)
+        self._current_branch_name: Optional[str] = None
 
-    def setup_repository(self, issue: Issue, base_branch: str = "main") -> Path:
+    def generate_branch_name(self, issue_number: int, title: str) -> str:
+        """Generate a branch name from issue number and title."""
+        safe_title = title.lower()
+        safe_title = "".join(c if c.isalnum() or c == " " else "" for c in safe_title)
+        safe_title = "-".join(safe_title.split()[:5])
+        return f"fix/issue-{issue_number}-{safe_title}"
+
+    def setup_repository(self, repo: str, issue_number: int, title: str, base_branch: str = "main") -> Path:
         """
         Clone repository and create feature branch.
 
         Input:
-            issue: The issue being worked on
+            repo: Repository in "owner/repo" format
+            issue_number: Issue number for branch naming
+            title: Issue title for branch naming
             base_branch: Base branch to branch from
 
         Output:
             Path to the repository
         """
+        owner, repo_name = repo.split("/")
+
         # Clone or update repository
         repo_path = self.github.clone_repository(
-            owner=issue.repo_owner,
-            repo=issue.repo_name,
+            owner=owner,
+            repo=repo_name,
             target_dir=self.work_dir,
             branch=base_branch,
         )
 
         # Create feature branch
-        branch_name = issue.branch_name
+        branch_name = self.generate_branch_name(issue_number, title)
+        self._current_branch_name = branch_name
         self.github.create_branch(repo_path, branch_name)
 
-        logger.info(f"Repository setup complete at {
-                    repo_path}, branch: {branch_name}")
+        logger.info(f"Repository setup complete at {repo_path}, branch: {branch_name}")
         return repo_path
 
     def commit_all_changes(self, repo_path: Path, message: str, files: Optional[list[str]] = None) -> None:
@@ -54,12 +66,22 @@ class GitService:
         """
         self.github.commit_changes(repo_path, message, files)
 
-    def push_and_create_pr(self, issue: Issue, summary: IssueSummary, plan: ActionPlan, files_changed: list[str], repo_path: Path, base_branch: str = "main") -> PullRequest:
+    def push_and_create_pr(
+        self,
+        repo: str,
+        issue_number: int,
+        summary: IssueSummary,
+        plan: ActionPlan,
+        files_changed: list[str],
+        repo_path: Path,
+        base_branch: str = "main",
+    ) -> PullRequest:
         """
         Push changes and create a pull request.
 
         Input:
-            issue: Original issue
+            repo: Repository in "owner/repo" format
+            issue_number: Issue number for PR linking
             summary: Issue summary
             plan: Action plan that was executed
             files_changed: List of changed files
@@ -69,28 +91,27 @@ class GitService:
         Output:
             Created PullRequest
         """
-        branch_name = issue.branch_name
+        owner, repo_name = repo.split("/")
+        branch_name = self._current_branch_name
 
         # Push branch
         self.github.push_branch(repo_path, branch_name)
 
         # Generate PR description
-        from .issue_processor import IssueProcessor
-        # Note: This is a bit circular, but IssueProcessor is stateless
-        # We only need it for the PR description generation
         pr_description = self._generate_pr_description(
             summary=summary,
             plan=plan,
             files_changed=files_changed,
+            issue_number=issue_number,
         )
 
         # Create PR title
-        pr_title = f"[{issue.number}] {summary.summary[:60]}"
+        pr_title = f"[{issue_number}] {summary.summary[:60]}"
 
         # Create PR
         pr = self.github.create_pull_request(
-            owner=issue.repo_owner,
-            repo=issue.repo_name,
+            owner=owner,
+            repo=repo_name,
             title=pr_title,
             body=pr_description,
             head_branch=branch_name,
@@ -100,7 +121,13 @@ class GitService:
         logger.info(f"Created PR #{pr.number}: {pr.url}")
         return pr
 
-    def _generate_pr_description(self, summary: IssueSummary, plan: ActionPlan, files_changed: list[str]) -> str:
+    def _generate_pr_description(
+        self,
+        summary: IssueSummary,
+        plan: ActionPlan,
+        files_changed: list[str],
+        issue_number: int,
+    ) -> str:
         """Generate a pull request description."""
         sections = []
 
@@ -124,8 +151,7 @@ class GitService:
 
         # Related issue
         sections.append("## Related Issue")
-        issue = summary.original_issue
-        sections.append(f"Closes #{issue.number}")
+        sections.append(f"Closes #{issue_number}")
         sections.append("")
 
         # Checklist
