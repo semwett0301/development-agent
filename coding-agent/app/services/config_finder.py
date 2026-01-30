@@ -103,16 +103,41 @@ class ConfigFinder:
             if compose_path.exists():
                 commands.has_docker_compose = True
                 logger.info(f"Found {name}")
-                # Try to find a test or app service
+                # Try to find the main service using YAML parsing
                 try:
+                    import yaml
                     content = compose_path.read_text()
-                    # Look for common service names
-                    for service in ["test", "tests", "app", "api", "backend", "web"]:
-                        if f"  {service}:" in content or f"services:\n  {service}:" in content:
-                            commands.docker_service_name = service
-                            break
-                except Exception:
-                    pass
+                    compose_data = yaml.safe_load(content)
+                    
+                    if compose_data and "services" in compose_data:
+                        services = list(compose_data["services"].keys())
+                        logger.info(f"Docker compose services: {services}")
+                        
+                        # Priority order for service names
+                        priority_services = ["app", "api", "backend", "web", "server", "test", "tests"]
+                        for service in priority_services:
+                            if service in services:
+                                commands.docker_service_name = service
+                                break
+                        
+                        # If no priority service found, use the first one
+                        if not commands.docker_service_name and services:
+                            commands.docker_service_name = services[0]
+                            logger.info(f"Using first service: {commands.docker_service_name}")
+                except ImportError:
+                    logger.warning("PyYAML not installed, using fallback service detection")
+                    # Fallback: regex-based detection
+                    try:
+                        content = compose_path.read_text()
+                        import re
+                        # Match service names under 'services:'
+                        match = re.search(r'services:\s*\n\s+(\w+):', content)
+                        if match:
+                            commands.docker_service_name = match.group(1)
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning(f"Failed to parse {name}: {e}")
                 break
 
     def _parse_config_file(self, file_path: Path, commands: ProjectCommands) -> None:

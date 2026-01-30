@@ -307,15 +307,19 @@ class Validator:
         # Get install command for this project type
         install_cmd = self._get_install_command(commands.project_type, repo_path)
 
+        # Convert npm commands to the correct package manager (yarn/pnpm)
+        lint_command = self._convert_npm_command(commands.lint_command, repo_path) if commands.lint_command else None
+        test_command = self._convert_npm_command(commands.test_command, repo_path) if commands.test_command else None
+
         # Run lint if available (chain install + lint in single container)
-        if commands.lint_command:
+        if lint_command:
             if install_cmd:
                 # Chain install + lint to keep dependencies in same container
-                full_cmd = f"sh -c '{install_cmd} && {commands.lint_command}'"
-                logger.info(f"Running in docker: {install_cmd} && {commands.lint_command}")
+                full_cmd = f"sh -c '{install_cmd} && {lint_command}'"
+                logger.info(f"Running in docker: {install_cmd} && {lint_command}")
             else:
-                full_cmd = commands.lint_command
-                logger.info(f"Running linter in docker: {commands.lint_command}")
+                full_cmd = lint_command
+                logger.info(f"Running linter in docker: {lint_command}")
 
             lint_cmd = f"docker compose run --rm {service} {full_cmd}"
             lint_result = self._run_command(lint_cmd, repo_path, timeout=600)
@@ -324,6 +328,8 @@ class Validator:
 
             logger.info(f"Lint result: exit={lint_result['returncode']}, output_len={len(result.lint_output)}")
             if lint_result["returncode"] != 0:
+                # Log full output for debugging
+                logger.warning(f"Lint output: {result.lint_output[:1000]}")
                 result.success = False
                 result.lint_errors = self._parse_lint_errors(
                     result.lint_output, commands.project_type)
@@ -338,14 +344,14 @@ class Validator:
                 logger.info("Lint passed")
 
         # Run tests if available (chain install + test in single container)
-        if commands.test_command:
+        if test_command:
             if install_cmd:
                 # Chain install + test to keep dependencies in same container
-                full_cmd = f"sh -c '{install_cmd} && {commands.test_command}'"
-                logger.info(f"Running in docker: {install_cmd} && {commands.test_command}")
+                full_cmd = f"sh -c '{install_cmd} && {test_command}'"
+                logger.info(f"Running in docker: {install_cmd} && {test_command}")
             else:
-                full_cmd = commands.test_command
-                logger.info(f"Running tests in docker: {commands.test_command}")
+                full_cmd = test_command
+                logger.info(f"Running tests in docker: {test_command}")
 
             test_cmd = f"docker compose run --rm {service} {full_cmd}"
             test_result = self._run_command(test_cmd, repo_path, timeout=600)
@@ -354,6 +360,8 @@ class Validator:
 
             logger.info(f"Test result: exit={test_result['returncode']}, output_len={len(result.test_output)}")
             if test_result["returncode"] != 0:
+                # Log full output for debugging
+                logger.warning(f"Test output: {result.test_output[:1000]}")
                 result.success = False
                 result.test_errors = self._parse_test_errors(
                     result.test_output, commands.project_type)
@@ -394,16 +402,20 @@ class Validator:
         # Get install command for this project type
         install_cmd = self._get_install_command(commands.project_type, repo_path)
 
+        # Convert npm commands to the correct package manager (yarn/pnpm)
+        lint_command = self._convert_npm_command(commands.lint_command, repo_path) if commands.lint_command else None
+        test_command = self._convert_npm_command(commands.test_command, repo_path) if commands.test_command else None
+
         try:
             # Run lint if available (with dependencies install)
-            if commands.lint_command:
+            if lint_command:
                 if install_cmd:
                     # Chain install + lint in single container
-                    full_cmd = f"sh -c '{install_cmd} && {commands.lint_command}'"
-                    logger.info(f"Running in docker: {install_cmd} && {commands.lint_command}")
+                    full_cmd = f"sh -c '{install_cmd} && {lint_command}'"
+                    logger.info(f"Running in docker: {install_cmd} && {lint_command}")
                 else:
-                    full_cmd = commands.lint_command
-                    logger.info(f"Running linter in docker: {commands.lint_command}")
+                    full_cmd = lint_command
+                    logger.info(f"Running linter in docker: {lint_command}")
                 
                 lint_cmd = f"docker run --rm {image_name} {full_cmd}"
                 lint_result = self._run_command(lint_cmd, repo_path, timeout=300)
@@ -426,14 +438,14 @@ class Validator:
                     logger.info("Lint passed")
 
             # Run tests if available (with dependencies install)
-            if commands.test_command:
+            if test_command:
                 if install_cmd:
                     # Chain install + test in single container
-                    full_cmd = f"sh -c '{install_cmd} && {commands.test_command}'"
-                    logger.info(f"Running in docker: {install_cmd} && {commands.test_command}")
+                    full_cmd = f"sh -c '{install_cmd} && {test_command}'"
+                    logger.info(f"Running in docker: {install_cmd} && {test_command}")
                 else:
-                    full_cmd = commands.test_command
-                    logger.info(f"Running tests in docker: {commands.test_command}")
+                    full_cmd = test_command
+                    logger.info(f"Running tests in docker: {test_command}")
                 
                 test_cmd = f"docker run --rm {image_name} {full_cmd}"
                 test_result = self._run_command(test_cmd, repo_path, timeout=600)
@@ -461,27 +473,24 @@ class Validator:
                     f"lint_errors={len(result.lint_errors)}, test_errors={len(result.test_errors)}")
         return result
 
+    def _detect_js_package_manager(self, repo_path: Path) -> str:
+        """Detect which JavaScript package manager the project uses."""
+        if (repo_path / "yarn.lock").exists():
+            return "yarn"
+        if (repo_path / "pnpm-lock.yaml").exists():
+            return "pnpm"
+        # Default to npm
+        return "npm"
+
     def _get_install_command(self, project_type: Optional[str], repo_path: Path) -> Optional[str]:
         """Get the appropriate install command for the project type."""
         if not project_type:
             return None
 
-        install_commands = {
-            "javascript": "npm install",
-            "typescript": "npm install",
-            "python": "pip install -r requirements.txt",
-            "go": "go mod download",
-            "rust": "cargo fetch",
-        }
-
         # Check for specific files to determine install command
         if project_type in ("javascript", "typescript"):
-            if (repo_path / "yarn.lock").exists():
-                return "yarn install"
-            if (repo_path / "pnpm-lock.yaml").exists():
-                return "pnpm install"
-            if (repo_path / "package-lock.json").exists() or (repo_path / "package.json").exists():
-                return "npm install"
+            pm = self._detect_js_package_manager(repo_path)
+            return f"{pm} install"
         elif project_type == "python":
             if (repo_path / "pyproject.toml").exists():
                 return "pip install -e ."
@@ -489,8 +498,33 @@ class Validator:
                 return "pip install -r requirements.txt"
             if (repo_path / "setup.py").exists():
                 return "pip install -e ."
+            return "pip install -r requirements.txt"
+        elif project_type == "go":
+            return "go mod download"
+        elif project_type == "rust":
+            return "cargo fetch"
 
-        return install_commands.get(project_type)
+        return None
+
+    def _convert_npm_command(self, command: str, repo_path: Path) -> str:
+        """Convert npm command to the appropriate package manager."""
+        if not command:
+            return command
+        
+        pm = self._detect_js_package_manager(repo_path)
+        if pm == "npm":
+            return command
+        
+        # Convert npm commands to yarn/pnpm equivalents
+        if command.startswith("npm run "):
+            script = command[8:]  # Remove "npm run "
+            return f"{pm} run {script}"
+        elif command.startswith("npm test"):
+            return f"{pm} test" if pm == "yarn" else f"{pm} test"
+        elif command == "npm install":
+            return f"{pm} install"
+        
+        return command
 
     def _is_valid_file_path(self, file_path: Optional[str]) -> bool:
         """Check if a string looks like a valid file path."""
