@@ -41,6 +41,27 @@ async def handle_webhook(
             delivery_id=x_github_delivery,
         )
 
+    # Incoming REDO event (e.g. custom webhook or integration)
+    elif x_github_event == "REDO":
+        repo = payload["repository"]["full_name"]
+        issue_number = payload.get("issue_number") or payload.get("issue", {}).get("number")
+        pr = payload.get("pull_request", {})
+        pr_number = payload.get("pull_request_number") or (pr.get("number") if isinstance(pr, dict) else None)
+        if issue_number is None:
+            raise HTTPException(status_code=400, detail="REDO event must contain issue_number or issue.number")
+        event = CodingEvent(
+            type="REDO",
+            repository=repo,
+            issue_number=issue_number,
+            pull_request_number=pr_number,
+        )
+        await send(
+            topic=CODING_EVENTS,
+            key=x_github_event,
+            value=event.model_dump_json().encode(),
+            delivery_id=x_github_delivery,
+        )
+
     # PR review comment → redo coding agent
     elif x_github_event == "pull_request_review_comment":
         pr = payload.get("pull_request", {})
