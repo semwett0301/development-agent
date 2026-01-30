@@ -179,13 +179,13 @@ class Validator:
         if validation_result.success:
             return CodeFixesOutput(fixes=[], explanation="No errors to fix", unfixable=[])
 
-        # Get files with errors (skip "unknown" placeholder)
+        # Get files with errors (skip invalid paths)
         error_files = set()
         for err in validation_result.lint_errors:
-            if err.file_path and err.file_path != "unknown":
+            if self._is_valid_file_path(err.file_path):
                 error_files.add(err.file_path)
         for err in validation_result.test_errors:
-            if err.file_path and err.file_path != "unknown":
+            if self._is_valid_file_path(err.file_path):
                 error_files.add(err.file_path)
 
         logger.info(f"Files with errors: {error_files}")
@@ -422,6 +422,37 @@ class Validator:
 
         return result
 
+    def _is_valid_file_path(self, file_path: Optional[str]) -> bool:
+        """Check if a string looks like a valid file path."""
+        if not file_path:
+            return False
+        if file_path == "unknown":
+            return False
+
+        # Filter out Docker log timestamps and other garbage
+        invalid_patterns = [
+            'time=',      # Docker log timestamp
+            'level=',     # Docker log level
+            'msg=',       # Docker log message
+            '\\x',        # Escape sequences
+            '\x00',       # Null bytes
+            '<',          # HTML/XML tags
+            '>',
+        ]
+        for pattern in invalid_patterns:
+            if pattern in file_path:
+                return False
+
+        # Must look like a file path (has extension or is in a directory)
+        if '/' not in file_path and '.' not in file_path:
+            return False
+
+        # Sanity check on length
+        if len(file_path) > 500:
+            return False
+
+        return True
+
     def _run_command(self, command: str, cwd: Path, timeout: int = 300) -> dict:
         """Run a shell command."""
         import time
@@ -472,12 +503,19 @@ class Validator:
         """Parse linter output into structured errors."""
         errors = []
 
+        # Filter out Docker log lines
+        filtered_lines = [
+            line for line in output.split('\n')
+            if not self._is_docker_log_line(line)
+        ]
+        filtered_output = '\n'.join(filtered_lines)
+
         if project_type == "python":
             # Ruff/flake8 format: path:line:col: code message
             pattern = r'^(.+?):(\d+):(\d+): (\w+) (.+)$'
-            for line in output.split('\n'):
+            for line in filtered_lines:
                 match = re.match(pattern, line)
-                if match:
+                if match and self._is_valid_file_path(match.group(1)):
                     errors.append(LintError(
                         file_path=match.group(1),
                         line=int(match.group(2)),
@@ -489,9 +527,9 @@ class Validator:
         elif project_type == "javascript":
             # ESLint format: path:line:col: message rule
             pattern = r'^(.+?):(\d+):(\d+): (.+?) \[(.+?)\]$'
-            for line in output.split('\n'):
+            for line in filtered_lines:
                 match = re.match(pattern, line.strip())
-                if match:
+                if match and self._is_valid_file_path(match.group(1)):
                     errors.append(LintError(
                         file_path=match.group(1),
                         line=int(match.group(2)),
@@ -503,10 +541,10 @@ class Validator:
         # Fallback: just extract file:line patterns
         if not errors:
             pattern = r'^(.+?):(\d+)'
-            for line in output.split('\n'):
+            for line in filtered_lines:
                 if 'error' in line.lower() or 'warning' in line.lower():
                     match = re.match(pattern, line)
-                    if match:
+                    if match and self._is_valid_file_path(match.group(1)):
                         errors.append(LintError(
                             file_path=match.group(1),
                             line=int(match.group(2)),
@@ -516,16 +554,42 @@ class Validator:
 
         return errors[:50]  # Limit to 50 errors
 
+    def _is_docker_log_line(self, line: str) -> bool:
+        """Check if a line is a Docker log line that should be filtered."""
+        docker_patterns = [
+            'time="',
+            'level=',
+            'msg="',
+            'docker',
+            'container',
+            'Pulling from',
+            'Digest:',
+            'Status:',
+            'latest:',
+            '----->',
+            'Step ',
+            'Successfully built',
+            'Successfully tagged',
+        ]
+        line_lower = line.lower()
+        return any(pattern.lower() in line_lower for pattern in docker_patterns)
+
     def _parse_test_errors(self, output: str, project_type: str) -> list[TestError]:
         """Parse test output into structured errors."""
         errors = []
 
+        # Filter out Docker log lines
+        filtered_lines = [
+            line for line in output.split('\n')
+            if not self._is_docker_log_line(line)
+        ]
+
         if project_type == "python":
             # Pytest format: FAILED test_file.py::test_name - message
             pattern = r'FAILED (.+?)::(.+?) - (.+)'
-            for line in output.split('\n'):
+            for line in filtered_lines:
                 match = re.search(pattern, line)
-                if match:
+                if match and self._is_valid_file_path(match.group(1)):
                     errors.append(TestError(
                         file_path=match.group(1),
                         test_name=match.group(2),
@@ -544,14 +608,16 @@ class Validator:
         elif project_type == "javascript":
             # Jest format: FAIL path - test name
             pattern = r'FAIL\s+(.+)'
-            for line in output.split('\n'):
+            for line in filtered_lines:
                 match = re.match(pattern, line)
                 if match:
-                    errors.append(TestError(
-                        file_path=match.group(1).strip(),
-                        test_name="Unknown",
-                        message="Test failed",
-                    ))
+                    file_path = match.group(1).strip()
+                    if self._is_valid_file_path(file_path):
+                        errors.append(TestError(
+                            file_path=file_path,
+                            test_name="Unknown",
+                            message="Test failed",
+                        ))
 
         # Fallback
         if not errors and ('FAILED' in output or 'FAIL' in output or 'Error' in output):
