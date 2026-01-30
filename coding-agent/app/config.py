@@ -51,19 +51,6 @@ class GitHubAppConfig:
 
 
 @dataclass
-class ChromaConfig:
-    """Chroma vector database configuration."""
-    host: str = "localhost"
-    port: int = 8000
-    collection_name: str = "codebase"
-    auth_token: Optional[str] = None
-
-    @property
-    def url(self) -> str:
-        return f"http://{self.host}:{self.port}"
-
-
-@dataclass
 class LangfuseConfig:
     """Langfuse observability configuration."""
     public_key: Optional[str] = None
@@ -88,7 +75,6 @@ class AgentConfig:
     """Main agent configuration."""
     llm: LLMConfig = field(default_factory=LLMConfig)
     github: GitHubAppConfig = field(default_factory=GitHubAppConfig)
-    chroma: ChromaConfig = field(default_factory=ChromaConfig)
     langfuse: Optional[LangfuseConfig] = None
 
     max_fix_attempts: int = 3
@@ -121,11 +107,6 @@ def load_config() -> AgentConfig:
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.1")),
         ),
         github=GitHubAppConfig(),
-        chroma=ChromaConfig(
-            host=os.getenv("CHROMA_HOST", "localhost"),
-            port=int(os.getenv("CHROMA_PORT", "8000")),
-            auth_token=os.getenv("CHROMA_AUTH_TOKEN"),
-        ),
         langfuse=langfuse if langfuse.is_configured else None,
         max_fix_attempts=int(os.getenv("MAX_FIX_ATTEMPTS", "3")),
         work_dir=os.getenv("WORK_DIR", "/tmp/coding_agent_workspaces"),

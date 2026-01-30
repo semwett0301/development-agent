@@ -29,9 +29,9 @@ def parse_issue_number_from_pr(body: Optional[str], title: Optional[str] = None)
     """
     Extract linked issue number from PR body (Closes #N, Fixes #N) or title ([N] ...).
     """
-    import re
     if body:
-        m = re.search(r"(?:Closes|Fixes|Resolves)\s+#(\d+)", body, re.IGNORECASE)
+        m = re.search(r"(?:Closes|Fixes|Resolves)\s+#(\d+)",
+                      body, re.IGNORECASE)
         if m:
             return int(m.group(1))
     if title:
@@ -98,7 +98,8 @@ class GitHubClient:
         params = {}
         if status:
             params["status"] = status
-        response = self._session.get(url, headers=headers, params=params or None)
+        response = self._session.get(
+            url, headers=headers, params=params or None)
         response.raise_for_status()
         data = response.json()
         return data.get("check_runs", [])

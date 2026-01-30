@@ -38,7 +38,8 @@ class ChromaClient:
                     port=self.config.port,
                 )
             except ImportError:
-                raise ImportError("chromadb not installed. Run: pip install chromadb")
+                raise ImportError(
+                    "chromadb not installed. Run: pip install chromadb")
             except Exception as e:
                 logger.warning(f"Could not connect to Chroma: {e}")
                 raise
@@ -78,7 +79,8 @@ class ChromaClient:
         formatted = []
         if results["documents"]:
             for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {
+                }
                 distance = results["distances"][0][i] if results["distances"] else 0
                 formatted.append(SearchResult(
                     file_path=metadata.get("file_path", "unknown"),

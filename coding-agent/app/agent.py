@@ -9,7 +9,7 @@ from langfuse import observe, get_client
 
 from .config import AgentConfig, load_config
 from .models import Issue, IssueSummary, ActionPlan, StepStatus
-from .clients import LLMClient, GitHubClient, ChromaClient, PullRequest, get_langfuse_callback, flush_langfuse
+from .clients import LLMClient, GitHubClient, PullRequest, get_langfuse_callback, flush_langfuse
 from .services import (
     IssueProcessor,
     CodeSearchService,
@@ -53,13 +53,12 @@ class CodingAgent:
         self.llm_client = LLMClient(
             self.config.llm, langfuse_callbacks=langfuse_callbacks)
         self.github_client = GitHubClient(self.config.github)
-        self.chroma_client = ChromaClient(self.config.chroma)
 
         llm = self.llm_client.llm
 
         self.issue_processor = IssueProcessor(
             llm, langfuse_callbacks=langfuse_callbacks)
-        self.code_search = CodeSearchService(self.chroma_client)
+        self.code_search = CodeSearchService()
         self.code_generator = CodeGenerator(
             llm, langfuse_callbacks=langfuse_callbacks)
         self.config_finder = ConfigFinder()

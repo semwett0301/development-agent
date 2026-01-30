@@ -19,22 +19,6 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: ${KAFKA_INTER_BROKER_LISTENER_NAME}
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: ${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}
 
-  chroma:
-    image: chromadb/chroma:0.6.3
-    ports:
-      - "8000:8000"
-    healthcheck:
-      test: curl -f http://localhost:8000/api/v2/heartbeat || exit 1
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    environment:
-      CHROMA_SERVER_AUTHN_CREDENTIALS: ${CHROMA_SERVER_AUTHN_CREDENTIALS}
-      CHROMA_SERVER_AUTHN_PROVIDER: ${CHROMA_SERVER_AUTHN_PROVIDER}
-      ANONYMIZED_TELEMETRY: "false"
-    volumes:
-      - chroma_data:/chroma/chroma
-
   webhook-service:
     image: ${DOCKERHUB_USERNAME}/webhook-service:latest
     ports:
@@ -55,17 +39,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY}
-      CHROMA_HOST: chroma
-      CHROMA_PORT: 8000
-      CHROMA_AUTH_TOKEN: ${CHROMA_SERVER_AUTHN_CREDENTIALS}
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL}
     depends_on:
       kafka:
         condition: service_healthy
-      chroma:
-        condition: service_healthy
-
-volumes:
-  chroma_data:

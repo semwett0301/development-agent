@@ -14,7 +14,6 @@ jobs:
       matrix:
         service:
           - coding-agent
-#          - indexer-service
           - webhook-service
 #          - reviewer-agent
 

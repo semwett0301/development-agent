@@ -59,7 +59,7 @@ def cosine_similarity(a: List[float], b: List[float]) -> float:
         min_len = min(len(a), len(b))
         a = a[:min_len]
         b = b[:min_len]
-        
+
     dot = sum(x * y for x, y in zip(a, b))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(x * x for x in b))

@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from ..clients import ChromaClient, SearchResult
 from ..models import IssueSummary, PlanStep
 
 logger = logging.getLogger(__name__)
@@ -11,70 +10,13 @@ logger = logging.getLogger(__name__)
 class CodeSearchService:
     """Search for relevant code in the codebase."""
 
-    def __init__(self, chroma_client: ChromaClient):
-        self.chroma = chroma_client
+    def search_for_issue(self, summary: IssueSummary, repo_name: str, n_results: int = 15) -> list:
+        """Search for code relevant to an issue."""
+        return []
 
-    def search_for_issue(self, summary: IssueSummary, repo_name: str, n_results: int = 15) -> list[SearchResult]:
-        """Search for code relevant to an issue.
-
-        Input:
-            summary: Summarized issue
-            repo_name: Repository name
-            n_results: Number of results to return
-
-        Output:
-            List of relevant code snippets
-        """
-        query_parts = [summary.summary]
-        query_parts.extend(summary.requirements[:3])
-        query_parts.extend(summary.affected_areas)
-
-        query = " ".join(query_parts)
-
-        logger.info(f"Searching for code relevant to: {query[:100]}...")
-
-        return self.chroma.search(
-            query=query,
-            repo_name=repo_name,
-            n_results=n_results,
-        )
-
-    def search_for_step(self, step: PlanStep, repo_name: str, n_results: int = 10) -> list[SearchResult]:
-        """
-        Search for code relevant to a specific plan step.
-
-        Input:
-            step: The plan step to search for
-            repo_name: Repository name
-            n_results: Number of results
-
-        Output:
-            List of relevant code snippets
-        """
-        query = f"{step.description} {step.details or ''}"
-
-        results = self.chroma.search(
-            query=query,
-            repo_name=repo_name,
-            n_results=n_results,
-        )
-
-        # бля че с хромой делать если она не стоит
-        file_results = self.chroma.search_by_file(
-            file_path=step.file_path,
-            repo_name=repo_name,
-            n_results=5,
-        )
-
-        seen_files = set()
-        combined = []
-
-        for result in results + file_results:
-            if result.file_path not in seen_files:
-                combined.append(result)
-                seen_files.add(result.file_path)
-
-        return combined[:n_results]
+    def search_for_step(self, step: PlanStep, repo_name: str, n_results: int = 10) -> list:
+        """Search for code relevant to a specific plan step."""
+        return []
 
     def get_file_content(self, file_path: str, repo_path: Path) -> Optional[str]:
         """
@@ -99,7 +41,7 @@ class CodeSearchService:
             logger.error(f"Failed to read file {full_path}: {e}")
             return None
 
-    def build_context(self, results: list[SearchResult], max_length: int = 10000) -> str:
+    def build_context(self, results: list, max_length: int = 10000) -> str:
         """
         Build a context string from search results.
 

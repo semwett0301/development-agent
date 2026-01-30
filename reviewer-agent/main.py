@@ -59,7 +59,8 @@ def _main() -> None:
     )
     parser.add_argument("--owner", required=True, help="Repository owner")
     parser.add_argument("--repo", required=True, help="Repository name")
-    parser.add_argument("--pr", type=int, required=True, help="Pull request number")
+    parser.add_argument("--pr", type=int, required=True,
+                        help="Pull request number")
     parser.add_argument(
         "--json",
         action="store_true",
