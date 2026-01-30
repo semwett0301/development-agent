@@ -19,19 +19,40 @@ settings = Settings()
 
 @dataclass
 class LLMConfig:
-    """LLM provider configuration."""
+    """LLM provider configuration.
+    
+    Supported providers:
+    - anthropic: Claude models (claude-opus-4-5-20251101, claude-sonnet-4-20250514, etc.)
+    - openai: GPT models (gpt-4o, gpt-4o-mini, gpt-4-turbo, etc.)
+    - mistral: Mistral models (mistral-large-latest, mistral-medium, codestral-latest, etc.)
+    - yandex: YandexGPT models (yandexgpt, yandexgpt-lite, etc.)
+    """
     provider: str = "anthropic"
     model: str = "claude-opus-4-5-20251101"
     api_key: Optional[str] = None
+    base_url: Optional[str] = None  # For custom endpoints
     max_tokens: int = 4096
     temperature: float = 0.1
+    
+    # Yandex-specific
+    folder_id: Optional[str] = None
 
     def __post_init__(self):
+        # Auto-load API keys from environment
         if self.api_key is None:
-            if self.provider == "anthropic":
-                self.api_key = os.getenv("ANTHROPIC_API_KEY")
-            else:
-                raise ValueError(f"Unknown LLM provider: {self.provider}")
+            env_keys = {
+                "anthropic": "ANTHROPIC_API_KEY",
+                "openai": "OPENAI_API_KEY",
+                "mistral": "MISTRAL_API_KEY",
+                "yandex": "YANDEX_API_KEY",
+            }
+            env_var = env_keys.get(self.provider)
+            if env_var:
+                self.api_key = os.getenv(env_var)
+        
+        # Yandex folder_id
+        if self.provider == "yandex" and self.folder_id is None:
+            self.folder_id = os.getenv("YANDEX_FOLDER_ID")
 
 
 @dataclass

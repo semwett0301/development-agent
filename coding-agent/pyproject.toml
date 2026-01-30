@@ -17,3 +17,14 @@ dependencies = [
     "cryptography>=42.0",
     "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+# Additional LLM providers
+openai = ["langchain-openai>=0.2"]
+mistral = ["langchain-mistralai>=0.2"]
+yandex = ["langchain-community>=0.3"]
+all-llms = [
+    "langchain-openai>=0.2",
+    "langchain-mistralai>=0.2",
+    "langchain-community>=0.3",
+]

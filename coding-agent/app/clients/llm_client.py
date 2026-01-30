@@ -19,23 +19,84 @@ def create_chat_model(config: LLMConfig) -> BaseChatModel:
     """
     Create a LangChain chat model from config.
 
+    Supported providers:
+    - anthropic: Claude models
+    - openai: GPT models
+    - mistral: Mistral AI models
+    - yandex: YandexGPT models
+
     Input:
         config: LLMConfig instance
 
     Output:
         A configured BaseChatModel instance
     """
-    try:
-        from langchain_anthropic import ChatAnthropic
-        return ChatAnthropic(
-            model=config.model,
-            api_key=config.api_key,
-            temperature=config.temperature,
-            max_tokens=config.max_tokens,
-        )
-    except ImportError:
-        raise ImportError(
-            "langchain-anthropic not installed. Run: pip install langchain-anthropic"
+    provider = config.provider.lower()
+    
+    if provider == "anthropic":
+        try:
+            from langchain_anthropic import ChatAnthropic
+            return ChatAnthropic(
+                model=config.model,
+                api_key=config.api_key,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+        except ImportError:
+            raise ImportError(
+                "langchain-anthropic not installed. Run: pip install langchain-anthropic"
+            )
+    
+    elif provider == "openai":
+        try:
+            from langchain_openai import ChatOpenAI
+            kwargs = {
+                "model": config.model,
+                "api_key": config.api_key,
+                "temperature": config.temperature,
+                "max_tokens": config.max_tokens,
+            }
+            if config.base_url:
+                kwargs["base_url"] = config.base_url
+            return ChatOpenAI(**kwargs)
+        except ImportError:
+            raise ImportError(
+                "langchain-openai not installed. Run: pip install langchain-openai"
+            )
+    
+    elif provider == "mistral":
+        try:
+            from langchain_mistralai import ChatMistralAI
+            return ChatMistralAI(
+                model=config.model,
+                api_key=config.api_key,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+        except ImportError:
+            raise ImportError(
+                "langchain-mistralai not installed. Run: pip install langchain-mistralai"
+            )
+    
+    elif provider == "yandex":
+        try:
+            from langchain_community.chat_models import ChatYandexGPT
+            return ChatYandexGPT(
+                model_uri=f"gpt://{config.folder_id}/{config.model}",
+                api_key=config.api_key,
+                folder_id=config.folder_id,
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+        except ImportError:
+            raise ImportError(
+                "langchain-community not installed. Run: pip install langchain-community"
+            )
+    
+    else:
+        raise ValueError(
+            f"Unknown LLM provider: {provider}. "
+            f"Supported: anthropic, openai, mistral, yandex"
         )
 
 
