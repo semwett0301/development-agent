@@ -1,15 +1,17 @@
 """
 GitHub API client for the Reviewing Agent.
-Uses same env (GITHUB_TOKEN) as coding_agent; provides PR, diff, check runs.
+
+Uses GitHub App authentication with automatic token refresh.
 """
 import logging
 import re
 from dataclasses import dataclass
 from typing import Optional
 
-import requests
+import httpx
 
-from ..config import GitHubConfig
+from ..config import GitHubAppConfig
+from shared.github import GitHubAppTokenManager
 
 logger = logging.getLogger(__name__)
 
@@ -116,24 +118,40 @@ def add_review_failed_message(body: str, max_attempts: int) -> str:
 
 
 class GitHubClient:
-    """Client for GitHub API (PR, diff, check runs)."""
+    """Client for GitHub API (PR, diff, check runs) using GitHub App authentication."""
 
-    def __init__(self, config: GitHubConfig):
+    def __init__(self, config: GitHubAppConfig):
         self.config = config
         self.base_url = config.api_url or "https://api.github.com"
-        self._session = requests.Session()
-        if config.token:
-            self._session.headers["Authorization"] = f"token {config.token}"
-        self._session.headers["Accept"] = "application/vnd.github.v3+json"
+        self._token_manager = GitHubAppTokenManager(
+            app_id=config.app_id,
+            private_key=config.private_key,
+            api_url=config.api_url,
+        )
 
-    def get_pull_request(self, owner: str, repo: str, pr_number: int) -> PullRequestData:
+    def _get_headers(self, token: str) -> dict:
+        return {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    async def _get_token_for_repo(self, owner: str, repo: str) -> str:
+        """Get installation token for a repository."""
+        full_repo = f"{owner}/{repo}"
+        return await self._token_manager.get_token_for_repo(full_repo)
+
+    async def get_pull_request(self, owner: str, repo: str, pr_number: int) -> PullRequestData:
         """Fetch a pull request by number."""
+        import asyncio
+        token = await self._get_token_for_repo(owner, repo)
         logger.debug(
             "[review] GitHub API: GET pull request %s/%s #%s", owner, repo, pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
-        response = self._session.get(url)
-        response.raise_for_status()
-        data = response.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=self._get_headers(token))
+            response.raise_for_status()
+            data = response.json()
         return PullRequestData(
             number=data["number"],
             title=data["title"],
@@ -143,67 +161,82 @@ class GitHubClient:
             html_url=data.get("html_url", ""),
         )
 
-    def get_pull_request_diff(self, owner: str, repo: str, pr_number: int) -> str:
+    async def get_pull_request_diff(self, owner: str, repo: str, pr_number: int) -> str:
         """Fetch the raw diff of a pull request."""
+        token = await self._get_token_for_repo(owner, repo)
         logger.debug(
             "[review] GitHub API: GET pull request diff %s/%s #%s", owner, repo, pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
-        headers = {"Accept": "application/vnd.github.v3.diff"}
-        response = self._session.get(url, headers=headers)
-        response.raise_for_status()
-        return response.text
+        headers = {
+            **self._get_headers(token),
+            "Accept": "application/vnd.github.v3.diff"
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return response.text
 
-    def get_check_runs_for_ref(
+    async def get_check_runs_for_ref(
         self, owner: str, repo: str, ref: str, status: Optional[str] = None
     ) -> list[dict]:
         """List check runs for a commit ref (e.g. PR head SHA)."""
+        token = await self._get_token_for_repo(owner, repo)
         logger.debug("[review] GitHub API: GET check runs %s/%s ref=%s",
                      owner, repo, (ref or "")[:7])
         url = f"{self.base_url}/repos/{owner}/{repo}/commits/{ref}/check-runs"
-        headers = {"Accept": "application/vnd.github+json"}
+        headers = self._get_headers(token)
         params = {}
         if status:
             params["status"] = status
-        response = self._session.get(
-            url, headers=headers, params=params or None)
-        response.raise_for_status()
-        data = response.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                url, headers=headers, params=params or None)
+            response.raise_for_status()
+            data = response.json()
         return data.get("check_runs", [])
 
-    def get_issue(self, owner: str, repo: str, issue_number: int) -> dict:
+    async def get_issue(self, owner: str, repo: str, issue_number: int) -> dict:
         """Fetch an issue (title, body) for review context."""
+        token = await self._get_token_for_repo(owner, repo)
         logger.debug("[review] GitHub API: GET issue %s/%s #%s",
                      owner, repo, issue_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}"
-        response = self._session.get(url)
-        response.raise_for_status()
-        return response.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, headers=self._get_headers(token))
+            response.raise_for_status()
+            return response.json()
 
-    def update_pull_request(self, owner: str, repo: str, pr_number: int, body: str) -> None:
+    async def update_pull_request(self, owner: str, repo: str, pr_number: int, body: str) -> None:
         """Update pull request body."""
+        token = await self._get_token_for_repo(owner, repo)
         logger.info(
             "[review] GitHub API: PATCH PR #%s (update body)", pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
-        response = self._session.patch(url, json={"body": body})
-        response.raise_for_status()
+        async with httpx.AsyncClient() as client:
+            response = await client.patch(url, headers=self._get_headers(token), json={"body": body})
+            response.raise_for_status()
 
-    def approve_pull_request(self, owner: str, repo: str, pr_number: int, comment: str = "LGTM! ✅") -> None:
+    async def approve_pull_request(self, owner: str, repo: str, pr_number: int, comment: str = "LGTM! ✅") -> None:
         """Create an approval review on the pull request."""
+        token = await self._get_token_for_repo(owner, repo)
         logger.info("[review] GitHub API: POST PR #%s approve", pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
-        response = self._session.post(url, json={
-            "event": "APPROVE",
-            "body": comment,
-        })
-        response.raise_for_status()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=self._get_headers(token), json={
+                "event": "APPROVE",
+                "body": comment,
+            })
+            response.raise_for_status()
 
-    def request_changes(self, owner: str, repo: str, pr_number: int, comment: str) -> None:
+    async def request_changes(self, owner: str, repo: str, pr_number: int, comment: str) -> None:
         """Request changes on the pull request."""
+        token = await self._get_token_for_repo(owner, repo)
         logger.info(
             "[review] GitHub API: POST PR #%s request_changes", pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
-        response = self._session.post(url, json={
-            "event": "REQUEST_CHANGES",
-            "body": comment,
-        })
-        response.raise_for_status()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=self._get_headers(token), json={
+                "event": "REQUEST_CHANGES",
+                "body": comment,
+            })
+            response.raise_for_status()

@@ -1,6 +1,7 @@
 """
 ReviewService: orchestration for reviewing a PR against Issue, diff, CI.
 """
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -233,10 +234,14 @@ class ReviewService:
 
     def _fetch_pr_data(self, owner: str, repo: str, pr_number: int) -> dict:
         """Fetch PR, diff, check runs, issue context, and compute review metadata."""
-        pr = self._github.get_pull_request(owner, repo, pr_number)
-        diff = self._github.get_pull_request_diff(owner, repo, pr_number)
-        check_runs = self._github.get_check_runs_for_ref(
-            owner, repo, pr.head_sha)
+        async def _fetch():
+            pr = await self._github.get_pull_request(owner, repo, pr_number)
+            diff = await self._github.get_pull_request_diff(owner, repo, pr_number)
+            check_runs = await self._github.get_check_runs_for_ref(
+                owner, repo, pr.head_sha)
+            return pr, diff, check_runs
+
+        pr, diff, check_runs = asyncio.run(_fetch())
         logger.info(
             "[review] Fetched PR head_sha=%s, diff=%s chars, check_runs=%s",
             pr.head_sha[:7] if pr.head_sha else "?",
@@ -286,17 +291,20 @@ class ReviewService:
         if params.is_normal and params.ci_passed:
             logger.info(
                 "[review] PR #%s passed review → approving", params.pr_number)
-            self._github.update_pull_request(
-                params.owner, params.repo, params.pr_number, updated_body)
-            self._github.approve_pull_request(
-                params.owner,
-                params.repo,
-                params.pr_number,
-                f"✅ Review passed! (attempt #{params.review_count})\n\n"
-                f"- CI: ✅ Passed\n"
-                f"- Requirements: ✅ Met\n"
-                f"- Summary similarity: {params.summary_similarity:.2f}",
-            )
+
+            async def _approve():
+                await self._github.update_pull_request(
+                    params.owner, params.repo, params.pr_number, updated_body)
+                await self._github.approve_pull_request(
+                    params.owner,
+                    params.repo,
+                    params.pr_number,
+                    f"✅ Review passed! (attempt #{params.review_count})\n\n"
+                    f"- CI: ✅ Passed\n"
+                    f"- Requirements: ✅ Met\n"
+                    f"- Summary similarity: {params.summary_similarity:.2f}",
+                )
+            asyncio.run(_approve())
         elif params.review_count >= self.MAX_REVIEW_ATTEMPTS and not params.ci_passed:
             logger.warning(
                 "[review] PR #%s failed after %s attempts → giving up, requesting changes",
@@ -305,17 +313,20 @@ class ReviewService:
             )
             updated_body = add_review_failed_message(
                 updated_body, self.MAX_REVIEW_ATTEMPTS)
-            self._github.update_pull_request(
-                params.owner, params.repo, params.pr_number, updated_body)
-            self._github.request_changes(
-                params.owner,
-                params.repo,
-                params.pr_number,
-                f"❌ После {
-                    self.MAX_REVIEW_ATTEMPTS} попыток ревью пайплайны всё ещё падают.\n\n"
-                f"Требуется ручное вмешательство.\n\n"
-                f"**Ошибки CI:**\n{params.ci_status}",
-            )
+
+            async def _request_changes():
+                await self._github.update_pull_request(
+                    params.owner, params.repo, params.pr_number, updated_body)
+                await self._github.request_changes(
+                    params.owner,
+                    params.repo,
+                    params.pr_number,
+                    f"❌ После {
+                        self.MAX_REVIEW_ATTEMPTS} попыток ревью пайплайны всё ещё падают.\n\n"
+                    f"Требуется ручное вмешательство.\n\n"
+                    f"**Ошибки CI:**\n{params.ci_status}",
+                )
+            asyncio.run(_request_changes())
         else:
             logger.info(
                 "[review] PR #%s needs fixes → updating body (attempt %s/%s)",
@@ -323,15 +334,20 @@ class ReviewService:
                 params.review_count,
                 self.MAX_REVIEW_ATTEMPTS,
             )
-            self._github.update_pull_request(
-                params.owner, params.repo, params.pr_number, updated_body)
+
+            async def _update():
+                await self._github.update_pull_request(
+                    params.owner, params.repo, params.pr_number, updated_body)
+            asyncio.run(_update())
 
     def _fetch_issue_context(self, owner: str, repo: str, issue_number: int, pr) -> tuple[str, str]:
         """Fetch issue title and body, falling back to PR data."""
-        try:
-            issue_data = self._github.get_issue(owner, repo, issue_number)
-        except Exception:
-            issue_data = {"title": pr.title, "body": pr.body or ""}
+        async def _fetch_issue():
+            try:
+                return await self._github.get_issue(owner, repo, issue_number)
+            except Exception:
+                return {"title": pr.title, "body": pr.body or ""}
+        issue_data = asyncio.run(_fetch_issue())
         return issue_data.get("title", pr.title), issue_data.get("body", "") or ""
 
     def _run_review_chain(self, issue_title: str, issue_body: str, diff: str,

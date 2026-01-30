@@ -38,17 +38,6 @@ class LLMConfig:
 
 
 @dataclass
-class GitHubConfig:
-    """GitHub API configuration."""
-    token: Optional[str] = None
-    api_url: str = "https://api.github.com"
-
-    def __post_init__(self):
-        if self.token is None:
-            self.token = os.getenv("GITHUB_TOKEN")
-
-
-@dataclass
 class GitHubAppConfig:
     """GitHub App configuration."""
     app_id: Optional[str] = None
@@ -88,7 +77,7 @@ class LangfuseConfig:
 class ReviewAgentConfig:
     """Reviewing Agent configuration."""
     llm: LLMConfig = field(default_factory=LLMConfig)
-    github: GitHubConfig = field(default_factory=GitHubConfig)
+    github: GitHubAppConfig = field(default_factory=GitHubAppConfig)
     langfuse: Optional[LangfuseConfig] = None
 
     # Review behavior
@@ -114,7 +103,7 @@ def load_config() -> ReviewAgentConfig:
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "4096")),
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.1")),
         ),
-        github=GitHubConfig(),
+        github=GitHubAppConfig(),
         langfuse=langfuse if langfuse.is_configured else None,
         summary_similarity_threshold=float(
             os.getenv("REVIEW_SUMMARY_SIMILARITY_THRESHOLD", "0.45")

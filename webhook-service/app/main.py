@@ -44,11 +44,14 @@ async def handle_webhook(
     # Incoming REDO event (e.g. custom webhook or integration)
     elif x_github_event == "REDO":
         repo = payload["repository"]["full_name"]
-        issue_number = payload.get("issue_number") or payload.get("issue", {}).get("number")
+        issue_number = payload.get("issue_number") or payload.get(
+            "issue", {}).get("number")
         pr = payload.get("pull_request", {})
-        pr_number = payload.get("pull_request_number") or (pr.get("number") if isinstance(pr, dict) else None)
+        pr_number = payload.get("pull_request_number") or (
+            pr.get("number") if isinstance(pr, dict) else None)
         if issue_number is None:
-            raise HTTPException(status_code=400, detail="REDO event must contain issue_number or issue.number")
+            raise HTTPException(
+                status_code=400, detail="REDO event must contain issue_number or issue.number")
         event = CodingEvent(
             type="REDO",
             repository=repo,
