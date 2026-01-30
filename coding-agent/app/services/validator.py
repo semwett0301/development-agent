@@ -73,12 +73,14 @@ class Validator:
                 )
                 # Fallback: if command failed but no errors parsed, add generic error
                 if not result.lint_errors:
-                    output_snippet = result.lint_output[:500] if result.lint_output.strip() else "(no output)"
+                    output_snippet = result.lint_output[:500] if result.lint_output.strip(
+                    ) else "(no output)"
                     result.lint_errors = [LintError(
                         file_path="unknown",
                         line=0,
                         column=0,
-                        message=f"Linter failed with exit code {lint_result['returncode']}. Output: {output_snippet}",
+                        message=f"Linter failed with exit code {
+                            lint_result['returncode']}. Output: {output_snippet}",
                         rule="lint-failure",
                     )]
         else:
@@ -99,11 +101,13 @@ class Validator:
                 )
                 # Fallback: if command failed but no errors parsed, add generic error
                 if not result.test_errors:
-                    traceback = result.test_output[-1500:] if result.test_output.strip() else "(no output)"
+                    traceback = result.test_output[-1500:] if result.test_output.strip(
+                    ) else "(no output)"
                     result.test_errors = [TestError(
                         test_name="unknown",
                         file_path=None,
-                        message=f"Tests failed with exit code {test_result['returncode']}",
+                        message=f"Tests failed with exit code {
+                            test_result['returncode']}",
                         traceback=traceback,
                     )]
         else:
@@ -154,13 +158,16 @@ class Validator:
 
         # If no file contents found, we can't generate fixes
         if not formatted_contents:
-            logger.warning("No file contents available for fixing - cannot generate fixes")
+            logger.warning(
+                "No file contents available for fixing - cannot generate fixes")
             # Try to extract useful info for unfixable list
             unfixable_msgs = []
             if validation_result.lint_output:
-                unfixable_msgs.append(f"Lint errors: {validation_result.lint_output[:500]}")
+                unfixable_msgs.append(
+                    f"Lint errors: {validation_result.lint_output[:500]}")
             if validation_result.test_output:
-                unfixable_msgs.append(f"Test errors: {validation_result.test_output[:500]}")
+                unfixable_msgs.append(
+                    f"Test errors: {validation_result.test_output[:500]}")
             return CodeFixesOutput(
                 fixes=[],
                 explanation="Could not locate files to fix",
@@ -233,9 +240,11 @@ class Validator:
             if result.stderr:
                 output += "\n" + result.stderr
 
-            logger.info(f"Command completed in {elapsed:.1f}s with exit code {result.returncode}")
+            logger.info(f"Command completed in {
+                        elapsed:.1f}s with exit code {result.returncode}")
             if result.returncode != 0:
-                logger.debug(f"Command output (first 500 chars): {output[:500]}")
+                logger.debug(f"Command output (first 500 chars): {
+                             output[:500]}")
 
             return {
                 "returncode": result.returncode,
