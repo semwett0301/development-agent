@@ -151,7 +151,7 @@ async def test_pr_review_comment_uses_pr_number_if_no_issue(client, mock_send):
 
     response = await client.post(
         "/github/webhook/", content=payload,
-        headers=_headers("pull_request_review_comment", payload))
+        headers=_headers("pull_request_review", payload))
 
     assert response.status_code == 200
 

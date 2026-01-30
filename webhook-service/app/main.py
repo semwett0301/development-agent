@@ -65,24 +65,25 @@ async def handle_webhook(
             delivery_id=x_github_delivery,
         )
 
-    # PR review comment → redo coding agent
-    elif x_github_event == "pull_request_review_comment":
-        pr = payload.get("pull_request", {})
-        # Get issue number from PR body (Closes #N) or use PR number
-        issue_number = _extract_issue_number(
-            pr.get("body", "")) or pr.get("number")
-        event = CodingEvent(
-            type="REDO",
-            repository=payload["repository"]["full_name"],
-            issue_number=issue_number,
-            pull_request_number=pr.get("number"),
-        )
-        await send(
-            topic=CODING_EVENTS,
-            key=x_github_event,
-            value=event.model_dump_json().encode(),
-            delivery_id=x_github_delivery,
-        )
+    # PR review submitted with "changes requested" → redo coding agent
+    elif x_github_event == "pull_request_review" and action == "submitted":
+        review = payload.get("review", {})
+        if review.get("state") == "changes_requested":
+            pr = payload.get("pull_request", {})
+            issue_number = _extract_issue_number(
+                pr.get("body", "")) or pr.get("number")
+            event = CodingEvent(
+                type="REDO",
+                repository=payload["repository"]["full_name"],
+                issue_number=issue_number,
+                pull_request_number=pr.get("number"),
+            )
+            await send(
+                topic=CODING_EVENTS,
+                key=x_github_event,
+                value=event.model_dump_json().encode(),
+                delivery_id=x_github_delivery,
+            )
 
     # Check suite completed → trigger review
     elif x_github_event == "check_suite" and action == "completed":
