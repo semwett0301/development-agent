@@ -2,4 +2,31 @@
 name = "reviewer-agent"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # LangChain
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-anthropic>=0.2.0",
+    # Pydantic
+    "pydantic>=2.0.0",
+    # GitHub API
+    "requests>=2.31.0",
+    "httpx>=0.24.0",
+    # Embeddings (summary similarity)
+    "sentence-transformers>=2.2.0",
+    # Web server
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.22.0",
+    # Kafka
+    "aiokafka>=0.9.0",
+    # Config
+    "python-dotenv>=1.0.0",
+    # Observability
+    "langfuse>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]

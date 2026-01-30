@@ -7,6 +7,19 @@ from typing import Optional
 
 
 @dataclass
+class Settings:
+    """Application settings from environment."""
+    kafka_bootstrap_servers: str = "localhost:9092"
+
+    def __post_init__(self):
+        self.kafka_bootstrap_servers = os.getenv(
+            "KAFKA_BOOTSTRAP_SERVERS", self.kafka_bootstrap_servers)
+
+
+settings = Settings()
+
+
+@dataclass
 class LLMConfig:
     """LLM provider configuration."""
     provider: str = "anthropic"
