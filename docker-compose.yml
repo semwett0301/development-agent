@@ -37,7 +37,7 @@ services:
       context: .
       dockerfile: coding-agent/Dockerfile
     ports:
-      - "8080:80"
+      - "8080:8080"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
@@ -58,7 +58,7 @@ services:
       context: .
       dockerfile: reviewer-agent/Dockerfile
     ports:
-      - "8081:80"
+      - "8081:8081"
     environment:
       KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}

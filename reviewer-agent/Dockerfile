@@ -17,6 +17,6 @@ ENV PYTHONPATH=/app
 COPY shared/ shared/
 COPY reviewer-agent/app app/
 
-EXPOSE 80
+EXPOSE 8081
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8081"]
