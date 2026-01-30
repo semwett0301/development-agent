@@ -299,6 +299,99 @@ class Validator:
         }
         return images.get(project_type, "node:20-alpine")
 
+    def _find_package_dir(self, repo_path: Path) -> Path:
+        """
+        Find the directory containing package.json for monorepo support.
+        Returns the relative path from repo_path.
+        """
+        # Check root first
+        if (repo_path / "package.json").exists():
+            return Path(".")
+        
+        # Common monorepo patterns
+        monorepo_patterns = [
+            "apps/backend",
+            "apps/api", 
+            "apps/server",
+            "packages/backend",
+            "packages/api",
+            "packages/server",
+            "backend",
+            "api",
+            "server",
+            "src",
+        ]
+        
+        for pattern in monorepo_patterns:
+            pkg_path = repo_path / pattern / "package.json"
+            if pkg_path.exists():
+                logger.info(f"Found package.json in monorepo: {pattern}")
+                return Path(pattern)
+        
+        # Search recursively (limited depth)
+        for depth in range(1, 4):
+            for pkg_file in repo_path.glob("*/" * depth + "package.json"):
+                rel_path = pkg_file.parent.relative_to(repo_path)
+                # Skip node_modules
+                if "node_modules" not in str(rel_path):
+                    logger.info(f"Found package.json at: {rel_path}")
+                    return rel_path
+        
+        return Path(".")
+
+    def _create_missing_env_files(self, repo_path: Path) -> list[str]:
+        """
+        Create missing .env files with placeholder values.
+        Returns list of created files.
+        """
+        created_files = []
+        
+        # Find .env.example or .env.template files
+        env_templates = list(repo_path.glob("**/.env.example")) + \
+                        list(repo_path.glob("**/.env.template")) + \
+                        list(repo_path.glob("**/.env.sample"))
+        
+        for template in env_templates:
+            # Skip node_modules
+            if "node_modules" in str(template):
+                continue
+            
+            env_file = template.parent / ".env"
+            if not env_file.exists():
+                try:
+                    # Copy template to .env
+                    content = template.read_text()
+                    env_file.write_text(content)
+                    rel_path = str(env_file.relative_to(repo_path))
+                    created_files.append(rel_path)
+                    logger.info(f"Created {rel_path} from {template.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to create .env from {template}: {e}")
+        
+        # Also check docker-compose for env_file references
+        compose_files = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
+        for compose_name in compose_files:
+            compose_path = repo_path / compose_name
+            if compose_path.exists():
+                try:
+                    content = compose_path.read_text()
+                    # Find env_file references
+                    import re
+                    env_refs = re.findall(r'env_file:\s*(?:-\s*)?["\']?([^"\'\n]+)["\']?', content)
+                    for env_ref in env_refs:
+                        env_path = repo_path / env_ref.strip()
+                        if not env_path.exists():
+                            # Create empty .env file
+                            env_path.parent.mkdir(parents=True, exist_ok=True)
+                            env_path.write_text("# Auto-generated placeholder\nNODE_ENV=development\n")
+                            rel_path = str(env_path.relative_to(repo_path))
+                            created_files.append(rel_path)
+                            logger.info(f"Created placeholder {rel_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to parse {compose_name}: {e}")
+        
+        return created_files
+
     def _validate_with_generic_container(self, repo_path: Path, commands: ProjectCommands) -> Optional[ValidationResult]:
         """
         Run validation in a generic container with mounted code.
@@ -313,6 +406,20 @@ class Validator:
         project_type = commands.project_type or "javascript"
         image = self._get_docker_image_for_project(project_type)
         logger.info(f"Using generic container for validation: {image}")
+
+        # Create missing config files (.env, etc.)
+        created_files = self._create_missing_env_files(repo_path)
+        if created_files:
+            logger.info(f"Created config files: {created_files}")
+
+        # Find the correct working directory (monorepo support)
+        if project_type in ("javascript", "typescript"):
+            package_dir = self._find_package_dir(repo_path)
+            workdir = f"/app/{package_dir}" if str(package_dir) != "." else "/app"
+        else:
+            workdir = "/app"
+        
+        logger.info(f"Working directory in container: {workdir}")
 
         # Get install command and convert npm commands to correct package manager
         install_cmd = self._get_install_command(project_type, repo_path)
@@ -331,7 +438,7 @@ class Validator:
         # Base docker run command with mounted volume
         # Use absolute path for Windows compatibility
         repo_path_str = str(repo_path).replace("\\", "/")
-        base_cmd = f'docker run --rm -v "{repo_path_str}:/app" -w /app {image}'
+        base_cmd = f'docker run --rm -v "{repo_path_str}:/app" -w {workdir} {image}'
 
         # Run lint if available
         if lint_command:
