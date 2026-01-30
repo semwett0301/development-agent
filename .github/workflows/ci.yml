@@ -67,6 +67,6 @@ jobs:
           script: |
             cd ${{ secrets.DEPLOY_PATH }}
             docker compose down
-            curl -sL https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml -o docker-compose.yml
+            curl -sL https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.prod.yml -o docker-compose.yml
             docker compose pull
             docker compose up -d
