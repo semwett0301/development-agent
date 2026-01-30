@@ -15,7 +15,7 @@ jobs:
         service:
           - coding-agent
           - webhook-service
-#          - reviewer-agent
+          - reviewer-agent
 
     steps:
       - uses: actions/checkout@v4
