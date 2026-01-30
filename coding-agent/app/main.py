@@ -51,7 +51,7 @@ async def run_agent_async(repo: str, issue_number: int):
         result = await loop.run_in_executor(
             None,
             lambda: run_agent(repo=repo, issue_number=issue_number,
-                              langfuse_trace_id=f"{repo}/{issue_number}")
+                              langfuse_trace_id=issue_number)
         )
 
         if result.success:

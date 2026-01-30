@@ -5,7 +5,7 @@ autopep8 --in-place --recursive coding-agent indexer-service webhook-service rev
 git add -u
 
 echo "Running pylint..."
-pylint coding-agent indexer-service webhook-service reviewer-agent || exit 1
+pylint coding-agent indexer-service webhook-service reviewer-agent shared || exit 1
 
 echo "Running pytest..."
 pytest || exit 1
