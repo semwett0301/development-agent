@@ -110,6 +110,7 @@ class PRResultParams:
     ci_status: str
     summary_similarity: float
     errors: list[ReviewError] = field(default_factory=list)
+    head_sha: Optional[str] = None  # PR head commit SHA for review API
 
 
 class ReviewService:
@@ -213,6 +214,7 @@ class ReviewService:
             ci_status=ci_status,
             summary_similarity=summary_similarity,
             errors=errors,
+            head_sha=pr.head_sha,
         )
         self._handle_pr_result(pr_result_params)
 
@@ -305,6 +307,7 @@ class ReviewService:
                     f"- CI: ✅ Passed\n"
                     f"- Requirements: ✅ Met\n"
                     f"- Summary similarity: {params.summary_similarity:.2f}",
+                    commit_id=params.head_sha,
                 )
             asyncio.run(_approve())
         elif params.review_count >= self.MAX_REVIEW_ATTEMPTS and not params.ci_passed:
@@ -327,6 +330,7 @@ class ReviewService:
                         self.MAX_REVIEW_ATTEMPTS} попыток ревью пайплайны всё ещё падают.\n\n"
                     f"Требуется ручное вмешательство.\n\n"
                     f"**Ошибки CI:**\n{params.ci_status}",
+                    commit_id=params.head_sha,
                 )
             asyncio.run(_request_changes())
         else:
@@ -342,7 +346,12 @@ class ReviewService:
                 await self._github.update_pull_request(
                     params.owner, params.repo, params.pr_number, updated_body)
                 await self._github.request_changes(
-                    params.owner, params.repo, params.pr_number, comment)
+                    params.owner,
+                    params.repo,
+                    params.pr_number,
+                    comment,
+                    commit_id=params.head_sha,
+                )
             asyncio.run(_update_and_comment())
 
     @staticmethod

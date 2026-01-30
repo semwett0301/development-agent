@@ -216,27 +216,43 @@ class GitHubClient:
             response = await client.patch(url, headers=self._get_headers(token), json={"body": body})
             response.raise_for_status()
 
-    async def approve_pull_request(self, owner: str, repo: str, pr_number: int, comment: str = "LGTM! ✅") -> None:
+    async def approve_pull_request(
+        self,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        comment: str = "LGTM! ✅",
+        commit_id: Optional[str] = None,
+    ) -> None:
         """Create an approval review on the pull request."""
         token = await self._get_token_for_repo(owner, repo)
         logger.info("[review] GitHub API: POST PR #%s approve", pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+        body = (comment or "").strip() or "LGTM!"
+        payload: dict = {"event": "APPROVE", "body": body}
+        if commit_id:
+            payload["commit_id"] = commit_id
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=self._get_headers(token), json={
-                "event": "APPROVE",
-                "body": comment,
-            })
+            response = await client.post(url, headers=self._get_headers(token), json=payload)
             response.raise_for_status()
 
-    async def request_changes(self, owner: str, repo: str, pr_number: int, comment: str) -> None:
-        """Request changes on the pull request."""
+    async def request_changes(
+        self,
+        owner: str,
+        repo: str,
+        pr_number: int,
+        comment: str,
+        commit_id: Optional[str] = None,
+    ) -> None:
+        """Request changes on the pull request. Body is required by GitHub (non-empty)."""
         token = await self._get_token_for_repo(owner, repo)
         logger.info(
             "[review] GitHub API: POST PR #%s request_changes", pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
+        body = (comment or "").strip() or "Please address the review feedback."
+        payload: dict = {"event": "REQUEST_CHANGES", "body": body}
+        if commit_id:
+            payload["commit_id"] = commit_id
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=self._get_headers(token), json={
-                "event": "REQUEST_CHANGES",
-                "body": comment,
-            })
+            response = await client.post(url, headers=self._get_headers(token), json=payload)
             response.raise_for_status()
