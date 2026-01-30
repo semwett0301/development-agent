@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from langfuse import observe
+from langfuse import observe, get_client
 
 from .config import AgentConfig, load_config
 from .models import Issue, IssueSummary, ActionPlan, StepStatus
@@ -255,6 +255,8 @@ def run_agent(
         base_branch: Branch to base changes on
         config: Optional agent configuration
     """
+
+    get_client().update_current_trace(session_id=f"{repo}#{issue_number}")
 
     agent = CodingAgent(config)
 
