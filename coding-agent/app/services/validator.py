@@ -56,6 +56,11 @@ class Validator:
         if commands is None:
             commands = self.config_finder.find_commands(repo_path)
 
+        # Skip install if using Docker (dependencies installed during build)
+        if commands.has_docker_compose or commands.has_dockerfile:
+            logger.info("Using Docker for validation - dependencies will be installed during build")
+            return True
+
         if not commands.install_command:
             logger.info("No install command found, skipping dependency installation")
             return True
@@ -87,6 +92,13 @@ class Validator:
         """
         if commands is None:
             commands = self.config_finder.find_commands(repo_path)
+
+        # Try Docker-based validation if available
+        if commands.has_docker_compose or commands.has_dockerfile:
+            docker_result = self._validate_with_docker(repo_path, commands)
+            if docker_result is not None:
+                return docker_result
+            logger.warning("Docker validation failed, falling back to direct commands")
 
         result = ValidationResult(success=True)
 
@@ -243,6 +255,139 @@ class Validator:
             logger.warning(f"Unfixable issues: {fixes.unfixable}")
 
         return fixed_files
+
+    def _validate_with_docker(self, repo_path: Path, commands: ProjectCommands) -> Optional[ValidationResult]:
+        """
+        Run validation inside Docker container.
+
+        Returns ValidationResult if Docker validation worked, None if should fallback.
+        """
+        # Check if Docker is available
+        docker_check = self._run_command("docker --version", repo_path, timeout=10)
+        if docker_check["returncode"] != 0:
+            logger.warning("Docker CLI not available")
+            return None
+
+        result = ValidationResult(success=True)
+
+        if commands.has_docker_compose:
+            return self._validate_with_compose(repo_path, commands, result)
+        elif commands.has_dockerfile:
+            return self._validate_with_dockerfile(repo_path, commands, result)
+
+        return None
+
+    def _validate_with_compose(self, repo_path: Path, commands: ProjectCommands, result: ValidationResult) -> Optional[ValidationResult]:
+        """Run validation using docker-compose."""
+        logger.info("Using docker-compose for validation")
+
+        # Build the containers
+        build_result = self._run_command("docker compose build", repo_path, timeout=600)
+        if build_result["returncode"] != 0:
+            logger.error(f"docker compose build failed: {build_result['output'][:500]}")
+            return None
+
+        service = commands.docker_service_name or "app"
+
+        # Run lint if available
+        if commands.lint_command:
+            logger.info(f"Running linter in docker: {commands.lint_command}")
+            lint_cmd = f"docker compose run --rm {service} {commands.lint_command}"
+            lint_result = self._run_command(lint_cmd, repo_path, timeout=300)
+            result.lint_command = lint_cmd
+            result.lint_output = lint_result.get("output", "")
+
+            if lint_result["returncode"] != 0:
+                result.success = False
+                result.lint_errors = self._parse_lint_errors(result.lint_output, commands.project_type)
+                if not result.lint_errors:
+                    result.lint_errors = [LintError(
+                        file_path="unknown", line=0, column=0,
+                        message=f"Linter failed in Docker. Output: {result.lint_output[:500]}",
+                        rule="docker-lint-failure",
+                    )]
+
+        # Run tests if available
+        if commands.test_command:
+            logger.info(f"Running tests in docker: {commands.test_command}")
+            test_cmd = f"docker compose run --rm {service} {commands.test_command}"
+            test_result = self._run_command(test_cmd, repo_path, timeout=600)
+            result.test_command = test_cmd
+            result.test_output = test_result.get("output", "")
+
+            if test_result["returncode"] != 0:
+                result.success = False
+                result.test_errors = self._parse_test_errors(result.test_output, commands.project_type)
+                if not result.test_errors:
+                    result.test_errors = [TestError(
+                        test_name="unknown", file_path=None,
+                        message=f"Tests failed in Docker",
+                        traceback=result.test_output[-1500:],
+                    )]
+
+        # Cleanup
+        self._run_command("docker compose down", repo_path, timeout=60)
+
+        return result
+
+    def _validate_with_dockerfile(self, repo_path: Path, commands: ProjectCommands, result: ValidationResult) -> Optional[ValidationResult]:
+        """Run validation by building and running Dockerfile."""
+        logger.info("Using Dockerfile for validation")
+
+        # Generate a unique image name
+        import hashlib
+        repo_hash = hashlib.md5(str(repo_path).encode()).hexdigest()[:8]
+        image_name = f"coding-agent-validation-{repo_hash}"
+
+        # Build the image
+        logger.info(f"Building Docker image: {image_name}")
+        build_result = self._run_command(f"docker build -t {image_name} .", repo_path, timeout=600)
+        if build_result["returncode"] != 0:
+            logger.error(f"Docker build failed: {build_result['output'][:500]}")
+            return None
+
+        try:
+            # Run lint if available
+            if commands.lint_command:
+                logger.info(f"Running linter in docker: {commands.lint_command}")
+                lint_cmd = f"docker run --rm {image_name} {commands.lint_command}"
+                lint_result = self._run_command(lint_cmd, repo_path, timeout=300)
+                result.lint_command = lint_cmd
+                result.lint_output = lint_result.get("output", "")
+
+                if lint_result["returncode"] != 0:
+                    result.success = False
+                    result.lint_errors = self._parse_lint_errors(result.lint_output, commands.project_type)
+                    if not result.lint_errors:
+                        result.lint_errors = [LintError(
+                            file_path="unknown", line=0, column=0,
+                            message=f"Linter failed in Docker. Output: {result.lint_output[:500]}",
+                            rule="docker-lint-failure",
+                        )]
+
+            # Run tests if available
+            if commands.test_command:
+                logger.info(f"Running tests in docker: {commands.test_command}")
+                test_cmd = f"docker run --rm {image_name} {commands.test_command}"
+                test_result = self._run_command(test_cmd, repo_path, timeout=600)
+                result.test_command = test_cmd
+                result.test_output = test_result.get("output", "")
+
+                if test_result["returncode"] != 0:
+                    result.success = False
+                    result.test_errors = self._parse_test_errors(result.test_output, commands.project_type)
+                    if not result.test_errors:
+                        result.test_errors = [TestError(
+                            test_name="unknown", file_path=None,
+                            message=f"Tests failed in Docker",
+                            traceback=result.test_output[-1500:],
+                        )]
+
+        finally:
+            # Cleanup - remove the image
+            self._run_command(f"docker rmi {image_name}", repo_path, timeout=60)
+
+        return result
 
     def _run_command(self, command: str, cwd: Path, timeout: int = 300) -> dict:
         """Run a shell command."""

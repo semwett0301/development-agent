@@ -21,6 +21,10 @@ class ProjectCommands:
     install_command: Optional[str] = None
     source_file: str = ""
     project_type: str = "unknown"
+    # Docker-related
+    has_dockerfile: bool = False
+    has_docker_compose: bool = False
+    docker_service_name: Optional[str] = None  # Service name for docker-compose
 
 
 class ConfigFinder:
@@ -49,6 +53,9 @@ class ConfigFinder:
         """
         commands = ProjectCommands()
 
+        # Check for Docker files first
+        self._detect_docker(repo_path, commands)
+
         # Check each config file
         for config_file in self.CONFIG_FILES:
             file_path = repo_path / config_file
@@ -65,9 +72,44 @@ class ConfigFinder:
         # Set defaults based on project type if commands not found
         self._set_defaults(repo_path, commands)
 
+        docker_info = ""
+        if commands.has_docker_compose:
+            docker_info = f", docker-compose: yes (service: {commands.docker_service_name})"
+        elif commands.has_dockerfile:
+            docker_info = ", dockerfile: yes"
+
         logger.info(
-            f"Found commands - lint: {commands.lint_command}, test: {commands.test_command}")
+            f"Found commands - lint: {commands.lint_command}, test: {commands.test_command}{docker_info}")
         return commands
+
+    def _detect_docker(self, repo_path: Path, commands: ProjectCommands) -> None:
+        """Detect Docker and docker-compose files."""
+        # Check for Dockerfile
+        dockerfile_names = ["Dockerfile", "dockerfile", "Dockerfile.dev", "Dockerfile.test"]
+        for name in dockerfile_names:
+            if (repo_path / name).exists():
+                commands.has_dockerfile = True
+                logger.info(f"Found {name}")
+                break
+
+        # Check for docker-compose
+        compose_names = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
+        for name in compose_names:
+            compose_path = repo_path / name
+            if compose_path.exists():
+                commands.has_docker_compose = True
+                logger.info(f"Found {name}")
+                # Try to find a test or app service
+                try:
+                    content = compose_path.read_text()
+                    # Look for common service names
+                    for service in ["test", "tests", "app", "api", "backend", "web"]:
+                        if f"  {service}:" in content or f"services:\n  {service}:" in content:
+                            commands.docker_service_name = service
+                            break
+                except Exception:
+                    pass
+                break
 
     def _parse_config_file(self, file_path: Path, commands: ProjectCommands) -> None:
         """Parse a configuration file for commands."""
