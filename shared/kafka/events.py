@@ -1,5 +1,9 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
 class CodingEvent(BaseModel):
-    body: str | None = None
+    type: Literal["START", "REDO"]
+    repository: str
+    issue_number: int

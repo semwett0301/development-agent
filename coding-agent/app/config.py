@@ -4,6 +4,17 @@ Configuration settings for the Coding Agent.
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+import base64
+
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """Kafka and app settings from environment."""
+    kafka_bootstrap_servers: str = "localhost:9092"
+
+
+settings = Settings()
 
 
 @dataclass
@@ -24,14 +35,19 @@ class LLMConfig:
 
 
 @dataclass
-class GitHubConfig:
-    """GitHub API configuration."""
-    token: Optional[str] = None
+class GitHubAppConfig:
+    """GitHub App configuration."""
+    app_id: Optional[str] = None
+    private_key: Optional[str] = None
     api_url: str = "https://api.github.com"
 
     def __post_init__(self):
-        if self.token is None:
-            self.token = os.getenv("GITHUB_TOKEN")
+        if self.app_id is None:
+            self.app_id = os.getenv("GITHUB_APP_ID")
+        if self.private_key is None:
+            raw = os.getenv("GITHUB_APP_PRIVATE_KEY")
+            if raw:
+                self.private_key = base64.b64decode(raw).decode()
 
 
 @dataclass
@@ -70,15 +86,13 @@ class LangfuseConfig:
 class AgentConfig:
     """Main agent configuration."""
     llm: LLMConfig = field(default_factory=LLMConfig)
-    github: GitHubConfig = field(default_factory=GitHubConfig)
+    github: GitHubAppConfig = field(default_factory=GitHubAppConfig)
     chroma: ChromaConfig = field(default_factory=ChromaConfig)
     langfuse: Optional[LangfuseConfig] = None
 
-    # Agent behavior settings
     max_fix_attempts: int = 3
     work_dir: str = "/tmp/coding_agent_workspaces"
 
-    # Config files to search for lint/test commands
     config_files: list[str] = field(default_factory=lambda: [
         "README.md",
         "package.json",
@@ -105,7 +119,7 @@ def load_config() -> AgentConfig:
             max_tokens=int(os.getenv("LLM_MAX_TOKENS", "16384")),
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.1")),
         ),
-        github=GitHubConfig(),
+        github=GitHubAppConfig(),
         chroma=ChromaConfig(
             host=os.getenv("CHROMA_HOST", "localhost"),
             port=int(os.getenv("CHROMA_PORT", "8000")),

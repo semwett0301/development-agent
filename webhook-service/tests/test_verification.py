@@ -1,7 +1,7 @@
 import hashlib
 import hmac
 
-from verification import verify_signature
+from app.verification import verify_signature
 
 SECRET = "test_secret"
 PAYLOAD = b'{"action": "opened"}'

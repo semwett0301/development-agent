@@ -1,15 +1,4 @@
 services:
-  postgres:
-    image: postgres:17
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
   kafka:
     image: apache/kafka:4.0.0
     ports:
@@ -34,6 +23,11 @@ services:
     image: chromadb/chroma:0.6.3
     ports:
       - "8000:8000"
+    healthcheck:
+      test: curl -f http://localhost:8000/api/v2/heartbeat || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
     environment:
       CHROMA_SERVER_AUTHN_CREDENTIALS: ${CHROMA_SERVER_AUTHN_CREDENTIALS}
       CHROMA_SERVER_AUTHN_PROVIDER: ${CHROMA_SERVER_AUTHN_PROVIDER}
@@ -51,6 +45,25 @@ services:
       kafka:
         condition: service_healthy
 
+  coding-agent:
+    image: ${DOCKERHUB_USERNAME}/coding-agent:latest
+    ports:
+      - "8082:80"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      GITHUB_APP_ID: ${GITHUB_APP_ID}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY}
+      CHROMA_HOST: chroma
+      CHROMA_PORT: 8000
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL}
+    depends_on:
+      kafka:
+        condition: service_healthy
+      chroma:
+        condition: service_healthy
+
 volumes:
-  postgres_data:
   chroma_data:

@@ -1,18 +1,11 @@
 """
 Coding Agent - Main orchestrator for automated code generation.
-
-This is the entry point that orchestrates the full flow:
-1. Receive issue from queue
-2. Summarize and create action plan
-3. Search for relevant code (RAG)
-4. Generate code changes
-5. Run linter and tests, fix if needed
-6. Create pull request
 """
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from langfuse import update_current_trace
 
 from .config import AgentConfig, load_config
 from .models import Issue, IssueSummary, ActionPlan, StepStatus
@@ -26,10 +19,7 @@ from .services import (
     GitService,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+
 logger = logging.getLogger(__name__)
 
 
@@ -54,18 +44,6 @@ class AgentResult:
 class CodingAgent:
     """
     Main coding agent that orchestrates the full workflow.
-
-    Flow:
-    1. Clone repo, create branch
-    2. Summarize issue → extract requirements
-    3. Generate action plan
-    4. For each step:
-       - Search for relevant code (RAG)
-       - Generate code changes
-       - Apply changes
-    5. Run linter + tests
-    6. If failed → fix → retry (max 3x)
-    7. Commit, push, create PR
     """
 
     def __init__(self, config: Optional[AgentConfig] = None):
@@ -73,16 +51,13 @@ class CodingAgent:
 
         langfuse_callbacks = get_langfuse_callback(self.config.langfuse)
 
-        # Initialize clients
         self.llm_client = LLMClient(
             self.config.llm, langfuse_callbacks=langfuse_callbacks)
         self.github_client = GitHubClient(self.config.github)
         self.chroma_client = ChromaClient(self.config.chroma)
 
-        # Get the underlying LangChain LLM for services
         llm = self.llm_client.llm
 
-        # Initialize services (now use LangChain LLM directly)
         self.issue_processor = IssueProcessor(
             llm, langfuse_callbacks=langfuse_callbacks)
         self.code_search = CodeSearchService(self.chroma_client)
@@ -100,28 +75,14 @@ class CodingAgent:
         issue_number: int,
         base_branch: str = "main",
     ) -> AgentResult:
-        """
-        Process a GitHub issue end-to-end.
-
-        Input:
-            issue: The issue to process (title, body, labels)
-            repo: Repository in "owner/repo" format
-            issue_number: Issue number for PR linking
-            base_branch: Branch to base changes on
-
-        Output:
-            AgentResult with execution details
-        """
+        """Process a GitHub issue end-to-end."""
         logger.info(f"Processing issue #{issue_number}: {issue.title}")
 
-        # Extract repo_name from "owner/repo" format
         repo_name = repo.split("/")[1]
-
-        result = AgentResult(success=False, issue=issue, repo=repo, issue_number=issue_number)
-        repo_path = None
+        result = AgentResult(success=False, issue=issue,
+                             repo=repo, issue_number=issue_number)
 
         try:
-            # Step 1: Setup repository
             logger.info("Step 1: Setting up repository...")
             repo_path = self.git_service.setup_repository(
                 repo=repo,
@@ -130,13 +91,11 @@ class CodingAgent:
                 base_branch=base_branch,
             )
 
-            # Step 2: Summarize issue
             logger.info("Step 2: Summarizing issue...")
             summary = self.issue_processor.summarize_issue(issue)
             result.summary = summary
             logger.info(f"Summary: {summary.summary}")
 
-            # Step 3: Search for relevant code
             logger.info("Step 3: Searching for relevant code...")
             search_results = self.code_search.search_for_issue(
                 summary=summary,
@@ -146,7 +105,6 @@ class CodingAgent:
             project_structure = self.code_search.get_project_structure(
                 repo_path)
 
-            # Step 4: Create action plan
             logger.info("Step 4: Creating action plan...")
             project_language = self.code_generator.get_project_language(
                 repo_path)
@@ -159,7 +117,6 @@ class CodingAgent:
             result.plan = plan
             logger.info(f"Plan has {len(plan.steps)} steps")
 
-            # Step 5: Execute plan
             logger.info("Step 5: Executing plan...")
             files_changed = self._execute_plan(
                 plan=plan,
@@ -168,7 +125,6 @@ class CodingAgent:
             )
             result.files_changed = files_changed
 
-            # Step 6: Validate and fix
             logger.info("Step 6: Validating changes...")
             validation_success = self._validate_and_fix(repo_path)
 
@@ -177,7 +133,6 @@ class CodingAgent:
                 logger.error(result.error)
                 return result
 
-            # Step 7: Commit changes
             logger.info("Step 7: Committing changes...")
             commit_message = self.issue_processor.create_commit_message(
                 summary=summary,
@@ -189,7 +144,6 @@ class CodingAgent:
                 message=commit_message,
             )
 
-            # Step 8: Push and create PR
             logger.info("Step 8: Creating pull request...")
             pr = self.git_service.push_and_create_pr(
                 repo=repo,
@@ -221,13 +175,11 @@ class CodingAgent:
             step.status = StepStatus.IN_PROGRESS
 
             try:
-                # Get current file content
                 current_content = self.code_search.get_file_content(
                     step.file_path,
                     repo_path,
                 )
 
-                # Search for related code
                 related_results = self.code_search.search_for_step(
                     step=step,
                     repo_name=repo_name,
@@ -235,7 +187,6 @@ class CodingAgent:
                 related_context = self.code_search.build_context(
                     related_results)
 
-                # Generate code changes
                 changes = self.code_generator.generate_for_step(
                     step=step,
                     current_content=current_content,
@@ -244,7 +195,6 @@ class CodingAgent:
                     repo_path=repo_path,
                 )
 
-                # Apply changes
                 files_changed = self.code_generator.apply_changes(
                     changes, repo_path)
                 all_files_changed.extend(files_changed)
@@ -257,7 +207,7 @@ class CodingAgent:
                 logger.error(f"Step {step.id} failed: {e}")
                 plan.mark_step_failed(step.id, str(e))
 
-        return list(set(all_files_changed))  # Deduplicate
+        return list(set(all_files_changed))
 
     def _validate_and_fix(self, repo_path: Path) -> bool:
         """Run validation and fix errors with retries."""
@@ -267,7 +217,6 @@ class CodingAgent:
             logger.info(f"Validation attempt {
                         attempt}/{self.config.max_fix_attempts}")
 
-            # Run validation
             result = self.validator.validate(repo_path, commands)
 
             if result.success:
@@ -278,7 +227,6 @@ class CodingAgent:
                            f"{len(result.test_errors)} test failures")
 
             if attempt < self.config.max_fix_attempts:
-                # Try to fix errors
                 logger.info("Attempting to fix errors...")
                 fixes = self.validator.fix_errors(result, repo_path)
 
@@ -291,39 +239,9 @@ class CodingAgent:
 
         return False
 
-    def process_issue_from_payload(self, payload: dict, base_branch: str = "main") -> AgentResult:
-        """
-        Process an issue from a webhook payload.
-
-        Input:
-            payload: GitHub webhook payload
-            base_branch: Branch to base changes on
-
-        Output:
-            AgentResult with execution details
-        """
-        # Extract issue from payload
-        issue_data = payload.get("issue", payload)
-        repo_data = payload.get("repository", {})
-
-        # Extract repo and issue_number
-        repo_owner = repo_data.get("owner", {}).get("login", "")
-        repo_name = repo_data.get("name", "")
-        repo = f"{repo_owner}/{repo_name}"
-        issue_number = issue_data.get("number", 0)
-
-        # Create simplified Issue
-        issue = Issue(
-            title=issue_data.get("title", ""),
-            body=issue_data.get("body", ""),
-            labels=[l.get("name", "") for l in issue_data.get("labels", [])],
-        )
-
-        return self.process_issue(issue, repo, issue_number, base_branch)
-
 
 def _observe_if_available(fn):
-    """Wrap in Langfuse @observe when available so all steps appear in one trace graph."""
+    """Wrap in Langfuse @observe when available."""
     try:
         from langfuse import observe
         return observe(name="coding_agent_run")(fn)
@@ -331,7 +249,6 @@ def _observe_if_available(fn):
         return fn
 
 
-# Convenience function for direct execution
 @_observe_if_available
 def run_agent(
     repo: str,
@@ -342,22 +259,21 @@ def run_agent(
     """
     Run the coding agent on a specific issue.
 
-    Input:
+    Args:
         repo: Repository in "owner/repo" format
         issue_number: Issue number to process
         base_branch: Branch to base changes on
         config: Optional agent configuration
-
-    Output:
-        AgentResult with execution details
     """
+    try:
+        update_current_trace(session_id=f"{repo}#{issue_number}")
+    except ImportError:
+        pass
+
     agent = CodingAgent(config)
 
-    # Fetch issue from GitHub (only title, body, labels)
-    owner, repo_name = repo.split("/")
-    issue_data = agent.github_client.get_issue(owner, repo_name, issue_number)
+    issue_data = agent.github_client.get_issue(repo, issue_number)
 
-    # Create simplified Issue
     issue = Issue(
         title=issue_data.title,
         body=issue_data.body,
@@ -365,30 +281,8 @@ def run_agent(
     )
 
     result = agent.process_issue(issue, repo, issue_number, base_branch)
-    # Flush Langfuse in short-lived runs so traces appear in the dashboard
+
     if agent.config.langfuse and agent.config.langfuse.is_configured:
         flush_langfuse()
+
     return result
-
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Run the Coding Agent")
-    parser.add_argument("--repo", required=True, help="Repository (owner/repo)")
-    parser.add_argument("--issue", type=int, required=True, help="Issue number")
-    parser.add_argument("--branch", default="main", help="Base branch")
-
-    args = parser.parse_args()
-
-    result = run_agent(
-        repo=args.repo,
-        issue_number=args.issue,
-        base_branch=args.branch,
-    )
-
-    if result.success:
-        print(f"Success! PR created: {result.pull_request.url}")
-    else:
-        print(f"Failed: {result.error}")
-        exit(1)

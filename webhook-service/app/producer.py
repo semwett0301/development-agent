@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator
 
 from aiokafka import AIOKafkaProducer
 
-from config import settings
+from .config import settings
 
 
 class _ProducerState:

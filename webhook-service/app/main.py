@@ -5,9 +5,9 @@ from fastapi import FastAPI, Header, Request, HTTPException
 from shared.kafka.topics import CODING_EVENTS, INDEX_EVENTS
 from shared.kafka.events import CodingEvent
 
-from config import settings
-from producer import lifespan, send
-from verification import verify_signature
+from .config import settings
+from .producer import lifespan, send
+from .verification import verify_signature
 
 app = FastAPI(lifespan=lifespan)
 
@@ -28,7 +28,9 @@ async def handle_webhook(
 
     if x_github_event == "issues" and payload.get("action") == "opened":
         event = CodingEvent(
-            body=payload["issue"]["body"],
+            type="START",
+            repository=payload["repository"]["full_name"],
+            issue_number=payload["issue"]["number"],
         )
 
         await send(

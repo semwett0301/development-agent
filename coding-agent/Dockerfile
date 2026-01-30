@@ -1,14 +1,16 @@
 FROM python:3.12-slim
 
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-COPY webhook-service/pyproject.toml .
+COPY coding-agent/pyproject.toml .
 RUN pip install --no-cache-dir .
 
 ENV PYTHONPATH=/app
 
 COPY shared/ shared/
-COPY webhook-service/app/ app/
+COPY coding-agent/app app/
 
 EXPOSE 80
 

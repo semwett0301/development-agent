@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         service:
-#          - coding-agent
+          - coding-agent
 #          - indexer-service
           - webhook-service
 #          - reviewer-agent

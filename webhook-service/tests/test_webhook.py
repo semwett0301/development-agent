@@ -5,7 +5,7 @@ import json
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from main import app
+from app.main import app
 
 SECRET = "test_secret"
 
@@ -31,7 +31,8 @@ async def client():
 async def test_issue_created_sends_to_coding_events(client, mock_send):
     payload = json.dumps({
         "action": "opened",
-        "issue": {"body": "Fix the bug"},
+        "repository": {"full_name": "owner/repo"},
+        "issue": {"number": 42, "title": "Test issue", "body": "Fix the bug"},
     }).encode()
 
     response = await client.post("/github/webhook/", content=payload, headers=_headers("issues", payload))
@@ -46,7 +47,9 @@ async def test_issue_created_sends_to_coding_events(client, mock_send):
     assert call_kwargs["key"] == "issues"
 
     value = json.loads(call_kwargs["value"])
-    assert value["body"] == "Fix the bug"
+    assert value["type"] == "START"
+    assert value["repository"] == "owner/repo"
+    assert value["issue_number"] == 42
 
 
 async def test_push_to_main_sends_to_index_events(client, mock_send):
@@ -97,7 +100,8 @@ async def test_invalid_signature_returns_403(client, mock_send):
 async def test_issue_with_null_body(client, mock_send):
     payload = json.dumps({
         "action": "opened",
-        "issue": {"body": None},
+        "repository": {"full_name": "owner/repo"},
+        "issue": {"number": 42, "title": "Test issue", "body": None},
     }).encode()
 
     response = await client.post("/github/webhook/", content=payload, headers=_headers("issues", payload))
@@ -106,4 +110,6 @@ async def test_issue_with_null_body(client, mock_send):
     mock_send.assert_called_once()
 
     value = json.loads(mock_send.call_args.kwargs["value"])
-    assert value["body"] is None
+    assert value["type"] == "START"
+    assert value["repository"] == "owner/repo"
+    assert value["issue_number"] == 42

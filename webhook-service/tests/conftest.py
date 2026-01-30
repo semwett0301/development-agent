@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 _ROOT_PATH = str(Path(__file__).resolve().parents[2])
-_APP_PATH = str(Path(__file__).resolve().parents[1] / "app")
-for p in (_ROOT_PATH, _APP_PATH):
+_SERVICE_PATH = str(Path(__file__).resolve().parents[1])
+for p in (_ROOT_PATH, _SERVICE_PATH):
     if p not in sys.path:
         sys.path.insert(0, p)
 
@@ -24,7 +24,8 @@ async def _noop_lifespan(_app: object) -> AsyncIterator[None]:
 
 @pytest.fixture(autouse=True)
 def _no_kafka():
-    from main import app  # pylint: disable=import-outside-toplevel
+    from app.main import app
+
     original = app.router.lifespan_context
     app.router.lifespan_context = _noop_lifespan
     yield
@@ -33,5 +34,5 @@ def _no_kafka():
 
 @pytest.fixture()
 def mock_send():
-    with patch("main.send", new_callable=AsyncMock) as mock:
+    with patch("app.main.send", new_callable=AsyncMock) as mock:
         yield mock

@@ -20,7 +20,8 @@ class GitService:
     def generate_branch_name(self, issue_number: int, title: str) -> str:
         """Generate a branch name from issue number and title."""
         safe_title = title.lower()
-        safe_title = "".join(c if c.isalnum() or c == " " else "" for c in safe_title)
+        safe_title = "".join(c if c.isalnum() or c ==
+                             " " else "" for c in safe_title)
         safe_title = "-".join(safe_title.split()[:5])
         return f"fix/issue-{issue_number}-{safe_title}"
 
@@ -52,7 +53,8 @@ class GitService:
         self._current_branch_name = branch_name
         self.github.create_branch(repo_path, branch_name)
 
-        logger.info(f"Repository setup complete at {repo_path}, branch: {branch_name}")
+        logger.info(f"Repository setup complete at {
+                    repo_path}, branch: {branch_name}")
         return repo_path
 
     def commit_all_changes(self, repo_path: Path, message: str, files: Optional[list[str]] = None) -> None:

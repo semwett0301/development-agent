@@ -102,7 +102,8 @@ class IssueProcessor:
         Returns:
             ActionPlan with implementation steps
         """
-        logger.info(f"Creating action plan for: {summary.original_issue.title}")
+        logger.info(f"Creating action plan for: {
+                    summary.original_issue.title}")
 
         # Invoke the chain
         invoke_kwargs = {}
