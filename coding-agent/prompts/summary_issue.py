@@ -16,8 +16,6 @@ SUMMARY_ISSUE_HUMAN = """## Issue Information
 **Body:**
 {body}
 
-**Labels:** {labels}
-
 ## Instructions
 
 Analyze the issue and extract the key information.

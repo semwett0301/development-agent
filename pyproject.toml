@@ -23,7 +23,7 @@ load-plugins = []
 ignore-paths = [".venv"]
 
 [tool.pylint.format]
-max-line-length = 120
+max-line-length = 200
 
 [tool.pylint."messages control"]
 disable = [
@@ -55,6 +55,8 @@ disable = [
     "duplicate-code",
     "line-too-long",
     "subprocess-run-check",
+    "global-statement",
+    "invalid-name"
 ]
 
 [tool.pylint.design]

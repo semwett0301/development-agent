@@ -73,11 +73,11 @@ class AgentConfig:
     github: GitHubConfig = field(default_factory=GitHubConfig)
     chroma: ChromaConfig = field(default_factory=ChromaConfig)
     langfuse: Optional[LangfuseConfig] = None
-    
+
     # Agent behavior settings
     max_fix_attempts: int = 3
     work_dir: str = "/tmp/coding_agent_workspaces"
-    
+
     # Config files to search for lint/test commands
     config_files: list[str] = field(default_factory=lambda: [
         "README.md",

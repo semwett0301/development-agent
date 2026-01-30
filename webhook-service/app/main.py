@@ -12,7 +12,7 @@ from verification import verify_signature
 app = FastAPI(lifespan=lifespan)
 
 
-@app.post("/github/webhook")
+@app.post("/github/webhook/")
 async def handle_webhook(
     request: Request,
     x_github_event: str = Header(),

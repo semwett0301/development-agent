@@ -12,7 +12,7 @@ from ..config import LangfuseConfig
 
 logger = logging.getLogger(__name__)
 
-_client_initialized = False
+_CLIENT_INITIALIZED = False
 
 
 def init_langfuse_client(config: Optional[LangfuseConfig]) -> bool:
@@ -23,10 +23,10 @@ def init_langfuse_client(config: Optional[LangfuseConfig]) -> bool:
     Returns:
         True if client was initialized, False if config is missing or init failed.
     """
-    global _client_initialized
+    global _CLIENT_INITIALIZED
     if config is None or not config.is_configured:
         return False
-    if _client_initialized:
+    if _CLIENT_INITIALIZED:
         return True
     try:
         from langfuse import Langfuse
@@ -35,7 +35,7 @@ def init_langfuse_client(config: Optional[LangfuseConfig]) -> bool:
             secret_key=config.secret_key,
             host=config.host,
         )
-        _client_initialized = True
+        _CLIENT_INITIALIZED = True
         return True
     except Exception as e:
         logger.warning("Langfuse client init failed: %s", e)
