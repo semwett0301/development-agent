@@ -1,6 +1,7 @@
 """
 Configuration settings for the Reviewing Agent.
 """
+import base64
 import os
 from dataclasses import dataclass, field
 from typing import Optional
@@ -45,6 +46,22 @@ class GitHubConfig:
     def __post_init__(self):
         if self.token is None:
             self.token = os.getenv("GITHUB_TOKEN")
+
+
+@dataclass
+class GitHubAppConfig:
+    """GitHub App configuration."""
+    app_id: Optional[str] = None
+    private_key: Optional[str] = None
+    api_url: str = "https://api.github.com"
+
+    def __post_init__(self):
+        if self.app_id is None:
+            self.app_id = os.getenv("GITHUB_APP_ID")
+        if self.private_key is None:
+            raw = os.getenv("GITHUB_APP_PRIVATE_KEY")
+            if raw:
+                self.private_key = base64.b64decode(raw).decode()
 
 
 @dataclass

@@ -63,7 +63,7 @@ REVIEW_FAILED_MARKER = "<!-- reviewer-agent-failed -->"
 def parse_review_count_from_pr_body(body: Optional[str]) -> int:
     """
     Extract the review count from PR body.
-    
+
     Format: <!-- reviewer-agent-count:N -->
     Returns 0 if not found.
     """
@@ -78,12 +78,12 @@ def parse_review_count_from_pr_body(body: Optional[str]) -> int:
 def update_review_count_in_body(body: Optional[str], count: int) -> str:
     """
     Update or add the review count marker in PR body.
-    
+
     Returns updated body.
     """
     body = body or ""
     marker = f"<!-- reviewer-agent-count:{count} -->"
-    
+
     # Check if marker already exists
     if REVIEW_COUNT_MARKER in body:
         # Replace existing marker
@@ -92,9 +92,8 @@ def update_review_count_in_body(body: Optional[str], count: int) -> str:
             marker,
             body
         )
-    else:
-        # Add marker at the end
-        return f"{body}\n\n{marker}"
+    # Add marker at the end
+    return f"{body}\n\n{marker}"
 
 
 def add_review_failed_message(body: str, max_attempts: int) -> str:
@@ -103,12 +102,12 @@ def add_review_failed_message(body: str, max_attempts: int) -> str:
     """
     if REVIEW_FAILED_MARKER in body:
         return body  # Already has failure message
-    
+
     failure_message = f"""
 
 ---
 
-⚠️ **Reviewer Agent**: После {max_attempts} попыток ревью пайплайны всё ещё падают. 
+⚠️ **Reviewer Agent**: После {max_attempts} попыток ревью пайплайны всё ещё падают.
 Требуется ручное вмешательство.
 
 {REVIEW_FAILED_MARKER}
@@ -129,6 +128,8 @@ class GitHubClient:
 
     def get_pull_request(self, owner: str, repo: str, pr_number: int) -> PullRequestData:
         """Fetch a pull request by number."""
+        logger.debug(
+            "[review] GitHub API: GET pull request %s/%s #%s", owner, repo, pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
         response = self._session.get(url)
         response.raise_for_status()
@@ -144,6 +145,8 @@ class GitHubClient:
 
     def get_pull_request_diff(self, owner: str, repo: str, pr_number: int) -> str:
         """Fetch the raw diff of a pull request."""
+        logger.debug(
+            "[review] GitHub API: GET pull request diff %s/%s #%s", owner, repo, pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
         headers = {"Accept": "application/vnd.github.v3.diff"}
         response = self._session.get(url, headers=headers)
@@ -154,6 +157,8 @@ class GitHubClient:
         self, owner: str, repo: str, ref: str, status: Optional[str] = None
     ) -> list[dict]:
         """List check runs for a commit ref (e.g. PR head SHA)."""
+        logger.debug("[review] GitHub API: GET check runs %s/%s ref=%s",
+                     owner, repo, (ref or "")[:7])
         url = f"{self.base_url}/repos/{owner}/{repo}/commits/{ref}/check-runs"
         headers = {"Accept": "application/vnd.github+json"}
         params = {}
@@ -167,6 +172,8 @@ class GitHubClient:
 
     def get_issue(self, owner: str, repo: str, issue_number: int) -> dict:
         """Fetch an issue (title, body) for review context."""
+        logger.debug("[review] GitHub API: GET issue %s/%s #%s",
+                     owner, repo, issue_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/issues/{issue_number}"
         response = self._session.get(url)
         response.raise_for_status()
@@ -174,27 +181,29 @@ class GitHubClient:
 
     def update_pull_request(self, owner: str, repo: str, pr_number: int, body: str) -> None:
         """Update pull request body."""
+        logger.info(
+            "[review] GitHub API: PATCH PR #%s (update body)", pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}"
         response = self._session.patch(url, json={"body": body})
         response.raise_for_status()
-        logger.info(f"Updated PR #{pr_number} body")
 
     def approve_pull_request(self, owner: str, repo: str, pr_number: int, comment: str = "LGTM! ✅") -> None:
         """Create an approval review on the pull request."""
+        logger.info("[review] GitHub API: POST PR #%s approve", pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
         response = self._session.post(url, json={
             "event": "APPROVE",
             "body": comment,
         })
         response.raise_for_status()
-        logger.info(f"Approved PR #{pr_number}")
 
     def request_changes(self, owner: str, repo: str, pr_number: int, comment: str) -> None:
         """Request changes on the pull request."""
+        logger.info(
+            "[review] GitHub API: POST PR #%s request_changes", pr_number)
         url = f"{self.base_url}/repos/{owner}/{repo}/pulls/{pr_number}/reviews"
         response = self._session.post(url, json={
             "event": "REQUEST_CHANGES",
             "body": comment,
         })
         response.raise_for_status()
-        logger.info(f"Requested changes on PR #{pr_number}")

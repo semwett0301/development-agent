@@ -55,7 +55,7 @@ def run_review(repo: str, pr_number: int) -> dict:
 
 async def run_review_async(repo: str, pr_number: int):
     """Run the reviewer agent asynchronously."""
-    logger.info(f"Starting review for {repo} PR #{pr_number}")
+    logger.info("[review] Starting review for %s PR #%s", repo, pr_number)
     try:
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -64,14 +64,19 @@ async def run_review_async(repo: str, pr_number: int):
         )
 
         if result["is_normal"]:
-            logger.info(f"Review completed: PR is normal (requirements_met={
-                        result['requirements_met']}, ci_passed={result['ci_passed']})")
+            logger.info(
+                "[review] Completed: PR is normal (requirements_met=%s, ci_passed=%s)",
+                result["requirements_met"],
+                result["ci_passed"],
+            )
         else:
-            logger.warning(f"Review completed: PR has issues (errors={
-                           result['errors_count']})")
+            logger.warning(
+                "[review] Completed: PR has issues (errors_count=%s)",
+                result["errors_count"],
+            )
 
     except Exception as e:
-        logger.exception(f"Review execution failed: {e}")
+        logger.exception("[review] Review execution failed: %s", e)
 
 
 async def consume_events(consumer: AIOKafkaConsumer):
@@ -82,10 +87,10 @@ async def consume_events(consumer: AIOKafkaConsumer):
                 try:
                     event = ReviewEvent.model_validate_json(msg.value)
                     logger.info(
-                        f"Received event: repo={event.repository}, "
-                        f"pr=#{event.pull_request_number}"
+                        "[review] Received event: repo=%s, pr=#%s",
+                        event.repository,
+                        event.pull_request_number,
                     )
-
                     asyncio.create_task(
                         run_review_async(
                             event.repository,
@@ -94,10 +99,10 @@ async def consume_events(consumer: AIOKafkaConsumer):
                     )
 
                 except Exception as e:
-                    logger.error(f"Failed to process message: {e}")
+                    logger.error("[review] Failed to process message: %s", e)
 
         except Exception as e:
-            logger.error(f"Consumer error: {e}")
+            logger.error("[review] Consumer error: %s", e)
             await asyncio.sleep(5)
 
 
@@ -111,7 +116,8 @@ async def lifespan(_: FastAPI):
     )
 
     await consumer.start()
-    logger.info(f"Kafka consumer started, listening to {REVIEW_EVENTS}")
+    logger.info(
+        "[review] Kafka consumer started, listening to %s", REVIEW_EVENTS)
 
     task = asyncio.create_task(consume_events(consumer))
 
@@ -119,7 +125,7 @@ async def lifespan(_: FastAPI):
 
     task.cancel()
     await consumer.stop()
-    logger.info("Kafka consumer stopped")
+    logger.info("[review] Kafka consumer stopped")
 
 
 app = FastAPI(lifespan=lifespan)

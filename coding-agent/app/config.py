@@ -20,7 +20,7 @@ settings = Settings()
 @dataclass
 class LLMConfig:
     """LLM provider configuration.
-    
+
     Supported providers:
     - anthropic: Claude models (claude-opus-4-5-20251101, claude-sonnet-4-20250514, etc.)
     - openai: GPT models (gpt-4o, gpt-4o-mini, gpt-4-turbo, etc.)
@@ -33,7 +33,7 @@ class LLMConfig:
     base_url: Optional[str] = None  # For custom endpoints
     max_tokens: int = 4096
     temperature: float = 0.1
-    
+
     # Yandex-specific
     folder_id: Optional[str] = None
 
@@ -49,7 +49,7 @@ class LLMConfig:
             env_var = env_keys.get(self.provider)
             if env_var:
                 self.api_key = os.getenv(env_var)
-        
+
         # Yandex folder_id
         if self.provider == "yandex" and self.folder_id is None:
             self.folder_id = os.getenv("YANDEX_FOLDER_ID")

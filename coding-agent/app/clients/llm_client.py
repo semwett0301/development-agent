@@ -32,7 +32,7 @@ def create_chat_model(config: LLMConfig) -> BaseChatModel:
         A configured BaseChatModel instance
     """
     provider = config.provider.lower()
-    
+
     if provider == "anthropic":
         try:
             from langchain_anthropic import ChatAnthropic
@@ -46,7 +46,7 @@ def create_chat_model(config: LLMConfig) -> BaseChatModel:
             raise ImportError(
                 "langchain-anthropic not installed. Run: pip install langchain-anthropic"
             )
-    
+
     elif provider == "openai":
         try:
             from langchain_openai import ChatOpenAI
@@ -63,7 +63,7 @@ def create_chat_model(config: LLMConfig) -> BaseChatModel:
             raise ImportError(
                 "langchain-openai not installed. Run: pip install langchain-openai"
             )
-    
+
     elif provider == "mistral":
         try:
             from langchain_mistralai import ChatMistralAI
@@ -77,7 +77,7 @@ def create_chat_model(config: LLMConfig) -> BaseChatModel:
             raise ImportError(
                 "langchain-mistralai not installed. Run: pip install langchain-mistralai"
             )
-    
+
     elif provider == "yandex":
         try:
             from langchain_community.chat_models import ChatYandexGPT
@@ -92,7 +92,7 @@ def create_chat_model(config: LLMConfig) -> BaseChatModel:
             raise ImportError(
                 "langchain-community not installed. Run: pip install langchain-community"
             )
-    
+
     else:
         raise ValueError(
             f"Unknown LLM provider: {provider}. "
