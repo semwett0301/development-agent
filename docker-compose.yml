@@ -31,6 +31,7 @@ services:
     environment:
       CHROMA_SERVER_AUTHN_CREDENTIALS: ${CHROMA_SERVER_AUTHN_CREDENTIALS}
       CHROMA_SERVER_AUTHN_PROVIDER: ${CHROMA_SERVER_AUTHN_PROVIDER}
+      ANONYMIZED_TELEMETRY: "false"
     volumes:
       - chroma_data:/chroma/chroma
 
