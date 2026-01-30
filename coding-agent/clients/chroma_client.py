@@ -68,14 +68,14 @@ class ChromaClient:
     ) -> list[SearchResult]:
         """
         Search for similar documents.
-        
+
         Args:
             query: Search query text
             repo_name: Optional repository name filter
             collection_name: Optional collection name override
             n_results: Number of results to return
             where: Optional metadata filter
-            
+
         Returns:
             List of SearchResult objects
         """
@@ -84,12 +84,12 @@ class ChromaClient:
         except Exception as e:
             logger.warning(f"Chroma not available: {e}")
             return []
-        
+
         kwargs = {
             "query_texts": [query],
             "n_results": n_results,
         }
-        
+
         # Build where filter
         filters = where or {}
         if repo_name:
@@ -98,14 +98,15 @@ class ChromaClient:
             kwargs["where"] = filters
 
         results = collection.query(**kwargs)
-        
+
         # Format results as SearchResult objects
         formatted = []
         if results["documents"]:
             for i, doc in enumerate(results["documents"][0]):
-                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {
+                }
                 distance = results["distances"][0][i] if results["distances"] else 0
-                
+
                 formatted.append(SearchResult(
                     file_path=metadata.get("file_path", "unknown"),
                     content=doc,
@@ -114,7 +115,7 @@ class ChromaClient:
                     end_line=metadata.get("end_line"),
                     metadata=metadata,
                 ))
-        
+
         return formatted
 
     def search_by_file(
@@ -125,19 +126,19 @@ class ChromaClient:
     ) -> list[SearchResult]:
         """
         Search for code chunks from a specific file.
-        
+
         Args:
             file_path: Path to the file
             repo_name: Optional repository name filter
             n_results: Number of results to return
-            
+
         Returns:
             List of SearchResult objects from the specified file
         """
         where = {"file_path": file_path}
         if repo_name:
             where["repo_name"] = repo_name
-        
+
         try:
             collection = self._get_collection()
             results = collection.get(
@@ -147,12 +148,13 @@ class ChromaClient:
         except Exception as e:
             logger.warning(f"Could not search by file: {e}")
             return []
-        
+
         formatted = []
         if results["documents"]:
             for i, doc in enumerate(results["documents"]):
-                metadata = results["metadatas"][i] if results["metadatas"] else {}
-                
+                metadata = results["metadatas"][i] if results["metadatas"] else {
+                }
+
                 formatted.append(SearchResult(
                     file_path=metadata.get("file_path", file_path),
                     content=doc,
@@ -161,7 +163,7 @@ class ChromaClient:
                     end_line=metadata.get("end_line"),
                     metadata=metadata,
                 ))
-        
+
         return formatted
 
     def add_documents(
@@ -173,7 +175,7 @@ class ChromaClient:
     ) -> None:
         """
         Add documents to the collection.
-        
+
         Args:
             documents: List of document texts
             metadatas: List of metadata dicts
@@ -181,22 +183,24 @@ class ChromaClient:
             collection_name: Optional collection name override
         """
         collection = self._get_collection(collection_name)
-        
+
         collection.add(
             documents=documents,
             metadatas=metadatas,
             ids=ids,
         )
-        
-        logger.info(f"Added {len(documents)} documents to {collection_name or self.config.collection_name}")
+
+        logger.info(f"Added {len(documents)} documents to {
+                    collection_name or self.config.collection_name}")
 
     def delete_collection(self, name: Optional[str] = None) -> None:
         """Delete a collection."""
         client = self._get_client()
         collection_name = name or self.config.collection_name
-        
+
         try:
             client.delete_collection(collection_name)
             logger.info(f"Deleted collection: {collection_name}")
         except Exception as e:
-            logger.warning(f"Could not delete collection {collection_name}: {e}")
+            logger.warning(f"Could not delete collection {
+                           collection_name}: {e}")

@@ -25,7 +25,8 @@ class Issue:
     def branch_name(self) -> str:
         """Generate branch name for this issue."""
         safe_title = self.title.lower()
-        safe_title = "".join(c if c.isalnum() or c == " " else "" for c in safe_title)
+        safe_title = "".join(c if c.isalnum() or c ==
+                             " " else "" for c in safe_title)
         safe_title = "-".join(safe_title.split()[:5])
         return f"fix/issue-{self.number}-{safe_title}"
 

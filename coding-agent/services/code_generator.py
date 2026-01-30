@@ -25,7 +25,7 @@ class CodeGenerator:
 
     def generate_for_step(self, step: PlanStep, current_content: Optional[str], related_context: str, conventions: str, repo_path: Path) -> CodeChange:
         """Generate code changes for a plan step.
-        
+
         Input:
             step: The plan step to implement
             current_content: Current file content (None if creating)
@@ -38,7 +38,7 @@ class CodeGenerator:
         result: CodeGenerationOutput = self.generate_chain.invoke({
             "step_description": step.description,
             "step_details": step.details or "No additional details",
-            "file_path": step.file_path, 
+            "file_path": step.file_path,
             "action": step.action.value,
             "current_content": current_content or "(file does not exist)",
             "related_context": related_context or "No related context available",
@@ -48,7 +48,8 @@ class CodeGenerator:
 
         edit = FileEdit(
             file_path=result.file_path,
-            edit_type=EditType(result.edit_type) if result.edit_type != "delete" else EditType.DELETE,
+            edit_type=EditType(
+                result.edit_type) if result.edit_type != "delete" else EditType.DELETE,
             new_content=result.new_content,
             old_content=current_content,
         )
@@ -62,7 +63,7 @@ class CodeGenerator:
 
     def fix_errors(self, error_summary: str, lint_output: str, test_output: str, files_with_errors: list[str], file_contents: dict[str, str]) -> CodeFixesOutput:
         """Fix linter errors and test failures.
-        
+
         Input:
             error_summary: Summary of all errors
             lint_output: Raw lint command output
@@ -83,11 +84,11 @@ class CodeGenerator:
     def apply_changes(self, changes: CodeChange, repo_path: Path) -> list[str]:
         """
         Apply code changes to the repository.
-        
+
         Input:
             changes: The code changes to apply
             repo_path: Path to repository
-            
+
         Output:
             List of modified file paths
         """
@@ -95,7 +96,7 @@ class CodeGenerator:
 
         for edit in changes.edits:
             file_path = repo_path / edit.file_path
-            
+
             logger.info(f"Applying {edit.edit_type.value} to {edit.file_path}")
 
             if edit.edit_type == EditType.DELETE:
@@ -104,7 +105,7 @@ class CodeGenerator:
                     modified_files.append(edit.file_path)
             else:
                 file_path.parent.mkdir(parents=True, exist_ok=True)
-                
+
                 if edit.new_content is not None:
                     file_path.write_text(edit.new_content, encoding="utf-8")
                     modified_files.append(edit.file_path)
@@ -114,11 +115,11 @@ class CodeGenerator:
     def apply_fixes(self, fixes: CodeFixesOutput, repo_path: Path) -> list[str]:
         """
         Apply code fixes to the repository.
-        
+
         Input:
             fixes: The code fixes to apply
             repo_path: Path to repository
-            
+
         Output:
             List of modified file paths
         """
@@ -126,11 +127,12 @@ class CodeGenerator:
 
         for fix in fixes.fixes:
             file_path = repo_path / fix.file_path
-            
-            logger.info(f"Applying fix to {fix.file_path}: {', '.join(fix.issues_fixed)}")
+
+            logger.info(f"Applying fix to {fix.file_path}: {
+                        ', '.join(fix.issues_fixed)}")
 
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             file_path.write_text(fix.new_content, encoding="utf-8")
             modified_files.append(fix.file_path)
 
@@ -139,10 +141,10 @@ class CodeGenerator:
     def get_project_conventions(self, repo_path: Path) -> str:
         """
         Extract project conventions from config files.
-        
+
         Input:
             repo_path: Path to repository
-            
+
         Output:
             Formatted conventions string
         """
@@ -153,7 +155,7 @@ class CodeGenerator:
             try:
                 content = pyproject.read_text()
                 conventions.append("## Python Project (pyproject.toml found)")
-                
+
                 if "[tool.ruff]" in content:
                     conventions.append("- Uses Ruff for linting")
                 if "[tool.black]" in content:
@@ -170,8 +172,9 @@ class CodeGenerator:
             try:
                 import json
                 content = json.loads(package_json.read_text())
-                conventions.append("## JavaScript/TypeScript Project (package.json found)")
-                
+                conventions.append(
+                    "## JavaScript/TypeScript Project (package.json found)")
+
                 deps = content.get("devDependencies", {})
                 if "eslint" in deps:
                     conventions.append("- Uses ESLint for linting")
@@ -195,7 +198,8 @@ class CodeGenerator:
             conventions.append("- Uses pre-commit hooks")
 
         if not conventions:
-            conventions.append("No specific conventions detected. Follow general best practices.")
+            conventions.append(
+                "No specific conventions detected. Follow general best practices.")
 
         return "\n".join(conventions)
 
@@ -231,8 +235,10 @@ class CodeGenerator:
                         for app in apps.iterdir():
                             if (app / "package.json").is_file():
                                 try:
-                                    app_pkg = json.loads((app / "package.json").read_text())
-                                    deps = {**app_pkg.get("dependencies", {}), **app_pkg.get("devDependencies", {})}
+                                    app_pkg = json.loads(
+                                        (app / "package.json").read_text())
+                                    deps = {
+                                        **app_pkg.get("dependencies", {}), **app_pkg.get("devDependencies", {})}
                                     if "react" in deps or "vite" in deps:
                                         stacks.append("React/Vite")
                                     elif "express" in deps or "fastify" in deps:

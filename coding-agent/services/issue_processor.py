@@ -28,7 +28,7 @@ class IssueProcessor:
     def __init__(self, llm: BaseChatModel):
         """
         Initialize the issue processor.
-        
+
         Args:
             llm: LangChain chat model to use
         """
@@ -53,10 +53,10 @@ class IssueProcessor:
     def summarize_issue(self, issue: Issue) -> IssueSummary:
         """
         Summarize an issue and extract requirements.
-        
+
         Args:
             issue: The GitHub issue to summarize
-            
+
         Returns:
             IssueSummary with extracted information
         """
@@ -87,17 +87,18 @@ class IssueProcessor:
     ) -> ActionPlan:
         """
         Create an action plan for implementing the issue.
-        
+
         Args:
             summary: Summarized issue
             code_context: Relevant code snippets from RAG
             project_structure: Project file structure
             project_language: Detected language/stack (e.g. "TypeScript/JavaScript. Use .ts, .tsx")
-            
+
         Returns:
             ActionPlan with implementation steps
         """
-        logger.info(f"Creating action plan for issue #{summary.original_issue.number}")
+        logger.info(f"Creating action plan for issue #{
+                    summary.original_issue.number}")
 
         # Invoke the chain
         result: ActionPlanOutput = self.plan_chain.invoke({
@@ -134,11 +135,11 @@ class IssueProcessor:
     ) -> str:
         """
         Generate a conventional commit message.
-        
+
         Args:
             summary: Issue summary
             changes_description: Description of changes made
-            
+
         Returns:
             Formatted commit message
         """
@@ -157,11 +158,12 @@ class IssueProcessor:
             scope = f"({summary.affected_areas[0]})"
 
         # Create message
-        title = summary.summary[:50] if len(summary.summary) > 50 else summary.summary
+        title = summary.summary[:50] if len(
+            summary.summary) > 50 else summary.summary
         title = title.lower().replace(".", "")
 
         message = f"{commit_type}{scope}: {title}"
-        
+
         if changes_description:
             message += f"\n\n{changes_description}"
 
@@ -177,12 +179,12 @@ class IssueProcessor:
     ) -> str:
         """
         Generate a pull request description.
-        
+
         Args:
             summary: Issue summary
             plan: Executed action plan
             files_changed: List of changed file paths
-            
+
         Returns:
             Formatted PR description in markdown
         """

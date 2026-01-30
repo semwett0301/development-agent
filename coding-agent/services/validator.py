@@ -24,7 +24,7 @@ class Validator:
     def __init__(self, llm: BaseChatModel, config_finder: Optional[ConfigFinder] = None):
         """
         Initialize the validator.
-        
+
         Input:
             llm: LangChain chat model to use
             config_finder: Optional config finder for project commands
@@ -43,11 +43,11 @@ class Validator:
     def validate(self, repo_path: Path, commands: Optional[ProjectCommands] = None) -> ValidationResult:
         """
         Run linter and tests on the repository.
-        
+
         Input:
             repo_path: Path to repository
             commands: Pre-discovered project commands (optional)
-            
+
         Output:
             ValidationResult with errors
         """
@@ -62,7 +62,7 @@ class Validator:
             lint_result = self._run_command(commands.lint_command, repo_path)
             result.lint_command = commands.lint_command
             result.lint_output = lint_result.get("output", "")
-            
+
             if lint_result["returncode"] != 0:
                 result.success = False
                 result.lint_errors = self._parse_lint_errors(
@@ -78,7 +78,7 @@ class Validator:
             test_result = self._run_command(commands.test_command, repo_path)
             result.test_command = commands.test_command
             result.test_output = test_result.get("output", "")
-            
+
             if test_result["returncode"] != 0:
                 result.success = False
                 result.test_errors = self._parse_test_errors(
@@ -93,11 +93,11 @@ class Validator:
     def fix_errors(self, validation_result: ValidationResult, repo_path: Path) -> CodeFixesOutput:
         """
         Use LLM chain to fix linter and test errors.
-        
+
         Input:
             validation_result: The validation result with errors
             repo_path: Path to repository
-            
+
         Output:
             CodeFixesOutput with fixes for each file
         """
@@ -121,7 +121,8 @@ class Validator:
                 try:
                     content = full_path.read_text()
                     file_contents[file_path] = content
-                    formatted_contents.append(f"### {file_path}\n```\n{content}\n```")
+                    formatted_contents.append(
+                        f"### {file_path}\n```\n{content}\n```")
                 except Exception as e:
                     logger.warning(f"Could not read {file_path}: {e}")
 
@@ -139,22 +140,23 @@ class Validator:
     def apply_fixes(self, fixes: CodeFixesOutput, repo_path: Path) -> list[str]:
         """
         Apply fixes to files.
-        
+
         Input:
             fixes: CodeFixesOutput with file fixes
             repo_path: Path to repository
-            
+
         Output:
             List of fixed file paths
         """
         fixed_files = []
-        
+
         for fix in fixes.fixes:
             full_path = repo_path / fix.file_path
             try:
                 full_path.write_text(fix.new_content, encoding="utf-8")
                 fixed_files.append(fix.file_path)
-                logger.info(f"Applied fix to {fix.file_path}: {', '.join(fix.issues_fixed)}")
+                logger.info(f"Applied fix to {fix.file_path}: {
+                            ', '.join(fix.issues_fixed)}")
             except Exception as e:
                 logger.error(f"Failed to apply fix to {fix.file_path}: {e}")
 
@@ -174,7 +176,7 @@ class Validator:
                 text=True,
                 timeout=timeout,
             )
-            
+
             output = result.stdout
             if result.stderr:
                 output += "\n" + result.stderr

@@ -25,17 +25,21 @@ development-agent/
 
 ### Prerequisites
 
+- Python 3.12+
 - Docker & Docker Compose
 
-### Infrastructure
-
-1. Copy the example environment file and adjust values if needed:
+### Setup
 
 ```bash
 cp .env.example .env
+make setup
 ```
 
-2. Start the services:
+This will install all dependencies, dev tools, and configure git hooks (pre-commit runs lint + tests).
+
+### Infrastructure
+
+Start the services:
 
 ```bash
 docker compose up -d

@@ -40,10 +40,10 @@ class ConfigFinder:
     def find_commands(self, repo_path: Path) -> ProjectCommands:
         """
         Find lint and test commands from project configuration.
-        
+
         Args:
             repo_path: Path to repository root
-            
+
         Returns:
             ProjectCommands with discovered commands
         """
@@ -65,7 +65,8 @@ class ConfigFinder:
         # Set defaults based on project type if commands not found
         self._set_defaults(repo_path, commands)
 
-        logger.info(f"Found commands - lint: {commands.lint_command}, test: {commands.test_command}")
+        logger.info(
+            f"Found commands - lint: {commands.lint_command}, test: {commands.test_command}")
         return commands
 
     def _parse_config_file(self, file_path: Path, commands: ProjectCommands) -> None:

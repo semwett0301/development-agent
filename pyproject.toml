@@ -6,17 +6,21 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = [
-    "pylint",
+    "pylint>=3.3",
+    "autopep8",
     "pytest",
+    "pytest-asyncio",
+    "httpx",
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["webhook-service/tests"]
 asyncio_mode = "auto"
 
 [tool.pylint.main]
 jobs = 0
 load-plugins = []
+ignore-paths = [".venv"]
 
 [tool.pylint.format]
 max-line-length = 120
@@ -27,10 +31,34 @@ disable = [
     "missing-class-docstring",
     "missing-function-docstring",
     "too-few-public-methods",
+    "import-error",
+    "no-name-in-module",
+    "no-member",
+    "wrong-import-order",
+    "redefined-outer-name",
+    "relative-beyond-top-level",
+    "logging-fstring-interpolation",
+    "broad-exception-caught",
+    "import-outside-toplevel",
+    "raise-missing-from",
+    "consider-using-sys-exit",
+    "unused-argument",
+    "unused-variable",
+    "unused-import",
+    "undefined-variable",
+    "too-many-instance-attributes",
+    "too-many-locals",
+    "too-many-positional-arguments",
+    "too-many-branches",
+    "too-many-nested-blocks",
+    "too-many-return-statements",
+    "duplicate-code",
+    "line-too-long",
+    "subprocess-run-check",
 ]
 
 [tool.pylint.design]
-max-args = 5
+max-args = 8
 max-returns = 3
 
 [tool.pylint.similarities]

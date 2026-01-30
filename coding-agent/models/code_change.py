@@ -73,17 +73,18 @@ class ValidationResult:
     def get_error_summary(self) -> str:
         """Get a summary of all errors for LLM context."""
         parts = []
-        
+
         if self.lint_errors:
             parts.append("=== LINT ERRORS ===")
             for err in self.lint_errors[:10]:
-                parts.append(f"{err.file_path}:{err.line}:{err.column} - {err.message}")
-        
+                parts.append(f"{err.file_path}:{err.line}:{
+                             err.column} - {err.message}")
+
         if self.test_errors:
             parts.append("\n=== TEST FAILURES ===")
             for err in self.test_errors[:5]:
                 parts.append(f"{err.test_name}: {err.message}")
                 if err.traceback:
                     parts.append(err.traceback[:500])
-        
+
         return "\n".join(parts)

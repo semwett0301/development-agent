@@ -26,7 +26,7 @@ class PlanStep:
     action: StepAction
     file_path: str
     description: str
-    details: Optional[str] = None 
+    details: Optional[str] = None
     depends_on: list[int] = field(default_factory=list)
     status: StepStatus = StepStatus.PENDING
     error_message: Optional[str] = None
@@ -42,7 +42,8 @@ class ActionPlan:
 
     def __post_init__(self):
         if self.estimated_files_changed == 0:
-            self.estimated_files_changed = len(set(s.file_path for s in self.steps))
+            self.estimated_files_changed = len(
+                set(s.file_path for s in self.steps))
 
     def get_pending_steps(self) -> list[PlanStep]:
         """Get all pending steps."""
@@ -53,7 +54,7 @@ class ActionPlan:
         pending = self.get_pending_steps()
         if not pending:
             return None
-        
+
         for step in pending:
             deps_completed = all(
                 self.steps[dep_id - 1].status == StepStatus.COMPLETED
@@ -62,7 +63,7 @@ class ActionPlan:
             )
             if deps_completed:
                 return step
-        
+
         return pending[0]
 
     def mark_step_completed(self, step_id: int) -> None:

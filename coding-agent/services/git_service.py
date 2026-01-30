@@ -19,11 +19,11 @@ class GitService:
     def setup_repository(self, issue: Issue, base_branch: str = "main") -> Path:
         """
         Clone repository and create feature branch.
-        
+
         Input:
             issue: The issue being worked on
             base_branch: Base branch to branch from
-            
+
         Output:
             Path to the repository
         """
@@ -39,13 +39,14 @@ class GitService:
         branch_name = issue.branch_name
         self.github.create_branch(repo_path, branch_name)
 
-        logger.info(f"Repository setup complete at {repo_path}, branch: {branch_name}")
+        logger.info(f"Repository setup complete at {
+                    repo_path}, branch: {branch_name}")
         return repo_path
 
     def commit_all_changes(self, repo_path: Path, message: str, files: Optional[list[str]] = None) -> None:
         """
         Commit all changes to the repository.
-        
+
         Input:
             repo_path: Path to repository
             message: Commit message
@@ -56,7 +57,7 @@ class GitService:
     def push_and_create_pr(self, issue: Issue, summary: IssueSummary, plan: ActionPlan, files_changed: list[str], repo_path: Path, base_branch: str = "main") -> PullRequest:
         """
         Push changes and create a pull request.
-        
+
         Input:
             issue: Original issue
             summary: Issue summary
@@ -64,7 +65,7 @@ class GitService:
             files_changed: List of changed files
             repo_path: Path to repository
             base_branch: Target branch for PR
-            
+
         Output:
             Created PullRequest
         """
@@ -139,12 +140,12 @@ class GitService:
     def cleanup(self, repo_path: Path) -> None:
         """
         Clean up the repository directory.
-        
+
         Input:
             repo_path: Path to repository to clean
         """
         import shutil
-        
+
         if repo_path.exists() and repo_path.is_relative_to(self.work_dir):
             try:
                 shutil.rmtree(repo_path)
