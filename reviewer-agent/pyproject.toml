@@ -12,8 +12,8 @@ dependencies = [
     # GitHub API
     "requests>=2.31.0",
     "httpx>=0.24.0",
-    # Embeddings (summary similarity)
-    "sentence-transformers>=2.2.0",
+    # Embeddings (summary similarity, ONNX, no PyTorch — small download)
+    "fastembed>=0.3.0",
     # Web server
     "fastapi>=0.100.0",
     "uvicorn[standard]>=0.22.0",

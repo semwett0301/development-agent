@@ -1,6 +1,6 @@
 """
 Embedding and cosine similarity for summary comparison.
-Uses sentence-transformers so the same model is used for both texts.
+Uses fastembed (ONNX, no PyTorch) — small download (~100–200 MB total).
 """
 import logging
 from typing import List
@@ -8,21 +8,32 @@ from typing import List
 logger = logging.getLogger(__name__)
 
 _encoder = None
-_DEFAULT_MODEL = "all-MiniLM-L6-v2"
+_embedding_dim: int | None = None
+
+_DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 
 
 def _get_encoder():
     global _encoder
     if _encoder is None:
         try:
-            from sentence_transformers import SentenceTransformer
-            _encoder = SentenceTransformer(_DEFAULT_MODEL)
+            from fastembed import TextEmbedding
+            _encoder = TextEmbedding(_DEFAULT_MODEL)
         except ImportError:
             logger.warning(
-                "sentence_transformers not installed; install with: pip install sentence-transformers"
+                "fastembed not installed; install with: pip install fastembed"
             )
             raise
     return _encoder
+
+
+def _get_embedding_dim() -> int:
+    global _embedding_dim
+    if _embedding_dim is None:
+        enc = _get_encoder()
+        vec = next(enc.embed([" "]))
+        _embedding_dim = int(vec.shape[0])
+    return _embedding_dim
 
 
 def embed(text: str) -> List[float]:
@@ -36,11 +47,9 @@ def embed(text: str) -> List[float]:
         List of floats (embedding vector).
     """
     if not (text or "").strip():
-        # Return zero vector for empty to avoid errors; similarity will be 0
-        enc = _get_encoder()
-        return [0.0] * enc.get_sentence_embedding_dimension()
+        return [0.0] * _get_embedding_dim()
     model = _get_encoder()
-    vec = model.encode(text, convert_to_numpy=True)
+    vec = next(model.embed([text]))
     return vec.tolist()
 
 
