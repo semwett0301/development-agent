@@ -24,7 +24,8 @@ class ProjectCommands:
     # Docker-related
     has_dockerfile: bool = False
     has_docker_compose: bool = False
-    docker_service_name: Optional[str] = None  # Service name for docker-compose
+    # Service name for docker-compose
+    docker_service_name: Optional[str] = None
 
 
 class ConfigFinder:
@@ -74,7 +75,8 @@ class ConfigFinder:
 
         docker_info = ""
         if commands.has_docker_compose:
-            docker_info = f", docker-compose: yes (service: {commands.docker_service_name})"
+            docker_info = f", docker-compose: yes (service: {
+                commands.docker_service_name})"
         elif commands.has_dockerfile:
             docker_info = ", dockerfile: yes"
 
@@ -85,7 +87,8 @@ class ConfigFinder:
     def _detect_docker(self, repo_path: Path, commands: ProjectCommands) -> None:
         """Detect Docker and docker-compose files."""
         # Check for Dockerfile
-        dockerfile_names = ["Dockerfile", "dockerfile", "Dockerfile.dev", "Dockerfile.test"]
+        dockerfile_names = ["Dockerfile", "dockerfile",
+                            "Dockerfile.dev", "Dockerfile.test"]
         for name in dockerfile_names:
             if (repo_path / name).exists():
                 commands.has_dockerfile = True
@@ -93,7 +96,8 @@ class ConfigFinder:
                 break
 
         # Check for docker-compose
-        compose_names = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
+        compose_names = ["docker-compose.yml",
+                         "docker-compose.yaml", "compose.yml", "compose.yaml"]
         for name in compose_names:
             compose_path = repo_path / name
             if compose_path.exists():

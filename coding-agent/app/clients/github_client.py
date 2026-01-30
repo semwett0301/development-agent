@@ -6,6 +6,9 @@ Uses GitHub App authentication with automatic token refresh.
 import logging
 from dataclasses import dataclass
 
+from pathlib import Path
+
+import git
 import httpx
 
 from ..config import GitHubAppConfig
@@ -55,7 +58,7 @@ class GitHubClient:
             Issue object with title, body, labels
         """
         import asyncio
-        token = asyncio.get_event_loop().run_until_complete(
+        token = asyncio.run(
             self._token_manager.get_token_for_repo(repo)
         )
 
@@ -75,39 +78,74 @@ class GitHubClient:
             labels=[label["name"] for label in data.get("labels", [])],
         )
 
+    def clone_repository(
+        self,
+        owner: str,
+        repo: str,
+        target_dir: Path,
+        branch: str = "main",
+    ) -> Path:
+        """Clone a repository and return the path."""
+        full_repo = f"{owner}/{repo}"
+        clone_url = self.get_clone_url(full_repo)
+        repo_path = target_dir / repo
+
+        if repo_path.exists():
+            logger.info(f"Repository already exists at {
+                        repo_path}, pulling latest")
+            r = git.Repo(repo_path)
+            r.remotes.origin.pull(branch)
+        else:
+            logger.info(f"Cloning {full_repo} into {repo_path}")
+            git.Repo.clone_from(clone_url, repo_path, branch=branch)
+
+        return repo_path
+
+    def create_branch(self, repo_path: Path, branch_name: str) -> None:
+        """Create and checkout a new branch."""
+        r = git.Repo(repo_path)
+        r.git.checkout("-b", branch_name)
+        logger.info(f"Created branch: {branch_name}")
+
+    def commit_changes(self, repo_path: Path, message: str, files: list[str] | None = None) -> None:
+        """Stage and commit changes."""
+        r = git.Repo(repo_path)
+        if files:
+            r.index.add(files)
+        else:
+            r.git.add("-A")
+        r.index.commit(message)
+        logger.info(f"Committed: {message}")
+
+    def push_branch(self, repo_path: Path, branch_name: str) -> None:
+        """Push a branch to origin."""
+        r = git.Repo(repo_path)
+        r.git.push("origin", branch_name)
+        logger.info(f"Pushed branch: {branch_name}")
+
     def create_pull_request(
         self,
+        owner: str,
         repo: str,
         title: str,
         body: str,
-        head: str,
-        base: str = "main",
+        head_branch: str,
+        base_branch: str = "main",
     ) -> PullRequest:
-        """
-        Create a pull request.
-
-        Args:
-            repo: Repository in "owner/repo" format
-            title: PR title
-            body: PR body/description
-            head: Source branch
-            base: Target branch
-
-        Returns:
-            PullRequest object
-        """
+        """Create a pull request."""
         import asyncio
-        token = asyncio.get_event_loop().run_until_complete(
-            self._token_manager.get_token_for_repo(repo)
+        full_repo = f"{owner}/{repo}"
+        token = asyncio.run(
+            self._token_manager.get_token_for_repo(full_repo)
         )
 
-        url = f"{self.base_url}/repos/{repo}/pulls"
+        url = f"{self.base_url}/repos/{full_repo}/pulls"
 
         payload = {
             "title": title,
             "body": body,
-            "head": head,
-            "base": base,
+            "head": head_branch,
+            "base": base_branch,
         }
 
         logger.info(f"Creating PR: {title}")
@@ -129,7 +167,7 @@ class GitHubClient:
     def add_comment(self, repo: str, issue_number: int, body: str) -> dict:
         """Add a comment to an issue or PR."""
         import asyncio
-        token = asyncio.get_event_loop().run_until_complete(
+        token = asyncio.run(
             self._token_manager.get_token_for_repo(repo)
         )
 
@@ -145,7 +183,7 @@ class GitHubClient:
     def get_clone_url(self, repo: str) -> str:
         """Get the authenticated clone URL for a repository."""
         import asyncio
-        token = asyncio.get_event_loop().run_until_complete(
+        token = asyncio.run(
             self._token_manager.get_token_for_repo(repo)
         )
         return f"https://x-access-token:{token}@github.com/{repo}.git"

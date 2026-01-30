@@ -10,6 +10,14 @@ from ..config import ChromaConfig
 logger = logging.getLogger(__name__)
 
 
+def _wrap_where(filters: dict) -> dict:
+    """Wrap multiple conditions in $and for Chroma compatibility."""
+    non_operator = {k: v for k, v in filters.items() if not k.startswith("$")}
+    if len(non_operator) <= 1:
+        return filters
+    return {"$and": [{k: v} for k, v in filters.items()]}
+
+
 @dataclass
 class SearchResult:
     """A single search result from the vector database."""
@@ -34,10 +42,17 @@ class ChromaClient:
         if self._client is None:
             try:
                 import chromadb
-                self._client = chromadb.HttpClient(
-                    host=self.config.host,
-                    port=self.config.port,
-                )
+                kwargs = {
+                    "host": self.config.host,
+                    "port": self.config.port,
+                }
+                if self.config.auth_token:
+                    from chromadb.config import Settings
+                    kwargs["settings"] = Settings(
+                        chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
+                        chroma_client_auth_credentials=self.config.auth_token,
+                    )
+                self._client = chromadb.HttpClient(**kwargs)
             except ImportError:
                 raise ImportError(
                     "chromadb not installed. Run: pip install chromadb"
@@ -95,7 +110,7 @@ class ChromaClient:
         if repo_name:
             filters["repo_name"] = repo_name
         if filters:
-            kwargs["where"] = filters
+            kwargs["where"] = _wrap_where(filters)
 
         results = collection.query(**kwargs)
 
@@ -142,7 +157,7 @@ class ChromaClient:
         try:
             collection = self._get_collection()
             results = collection.get(
-                where=where,
+                where=_wrap_where(where),
                 limit=n_results,
             )
         except Exception as e:
