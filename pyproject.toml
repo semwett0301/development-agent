@@ -1,0 +1,37 @@
+[project]
+name = "development-agent"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pylint",
+    "pytest",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.pylint.main]
+jobs = 0
+load-plugins = []
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint."messages control"]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "too-few-public-methods",
+]
+
+[tool.pylint.design]
+max-args = 5
+max-returns = 3
+
+[tool.pylint.similarities]
+min-similarity-lines = 6

@@ -12,9 +12,42 @@ development-agent/
 ├── reviewer-agent/     # Agent for automated code review
 ```
 
+## Services
+
+| Service          | Port   | Description                               |
+|------------------|--------|-------------------------------------------|
+| coding-agent     | `8001` | Agent for code generation and transformation |
+| indexer-service   | `8002` | Service for indexing and retrieval         |
+| proxy-service     | `8003` | Gateway and routing service               |
+| reviewer-agent    | `8004` | Agent for automated code review           |
+
 ## Getting Started
 
-> **Note:** The project is in its initial stage. Setup instructions will be added as services are implemented.
+### Prerequisites
+
+- Docker & Docker Compose
+
+### Infrastructure
+
+1. Copy the example environment file and adjust values if needed:
+
+```bash
+cp .env.example .env
+```
+
+2. Start the services:
+
+```bash
+docker compose up -d
+```
+
+This will start:
+
+| Service    | Port   | Description            |
+|------------|--------|------------------------|
+| PostgreSQL | `5432` | Primary database       |
+| Kafka      | `9092` | Message broker (KRaft) |
+| Chroma     | `8000` | Vector database        |
 
 ## Commit Convention
 
