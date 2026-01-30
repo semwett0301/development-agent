@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -9,16 +9,6 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        service:
-          - coding-agent
-          - indexer-service
-          - proxy-service
-          - reviewer-agent
-
-    name: ${{ matrix.service }}
 
     steps:
       - uses: actions/checkout@v4
@@ -30,11 +20,53 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -e ".[dev]"
-          pip install -e "${{ matrix.service }}"
+          pip install -e coding-agent -e indexer-service -e webhook-service -e reviewer-agent
 
       - name: Lint
-        run: pylint ${{ matrix.service }}
+        run: pylint coding-agent indexer-service webhook-service reviewer-agent
 
       - name: Test
-        working-directory: ${{ matrix.service }}
         run: pytest
+
+  build:
+    needs: check
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service:
+          - coding-agent
+          - indexer-service
+          - webhook-service
+          - reviewer-agent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service }}
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service }}:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            docker compose down
+            curl -sL https://raw.githubusercontent.com/${{ github.repository }}/main/docker-compose.yml -o docker-compose.yml
+            docker compose pull
+            docker compose up -d
