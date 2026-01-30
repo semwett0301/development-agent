@@ -8,4 +8,4 @@ echo "Running pylint..."
 pylint coding-agent webhook-service reviewer-agent shared || exit 1
 
 echo "Running pytest..."
-#pytest || exit 1
+pytest || exit 1

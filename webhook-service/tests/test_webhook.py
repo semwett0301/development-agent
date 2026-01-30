@@ -111,25 +111,25 @@ async def test_redo_event_missing_issue_returns_400(client, mock_send):
 
 async def test_pr_review_comment_sends_redo(client, mock_send):
     payload = json.dumps({
-        "action": "created",
+        "action": "submitted",
         "repository": {"full_name": "owner/repo"},
         "pull_request": {
             "number": 123,
             "body": "Closes #42",
         },
-        "comment": {"body": "Please fix this"},
+        "review": {"state": "changes_requested"},
     }).encode()
 
     response = await client.post(
         "/github/webhook/", content=payload,
-        headers=_headers("pull_request_review_comment", payload))
+        headers=_headers("pull_request_review", payload))
 
     assert response.status_code == 200
 
     mock_send.assert_called_once()
     call_kwargs = mock_send.call_args.kwargs
     assert call_kwargs["topic"] == "coding-events"
-    assert call_kwargs["key"] == "pull_request_review_comment"
+    assert call_kwargs["key"] == "pull_request_review"
 
     value = json.loads(call_kwargs["value"])
     assert value["type"] == "REDO"
@@ -140,13 +140,13 @@ async def test_pr_review_comment_sends_redo(client, mock_send):
 
 async def test_pr_review_comment_uses_pr_number_if_no_issue(client, mock_send):
     payload = json.dumps({
-        "action": "created",
+        "action": "submitted",
         "repository": {"full_name": "owner/repo"},
         "pull_request": {
             "number": 99,
             "body": "Some changes without issue link",
         },
-        "comment": {"body": "Fix this"},
+        "review": {"state": "changes_requested"},
     }).encode()
 
     response = await client.post(

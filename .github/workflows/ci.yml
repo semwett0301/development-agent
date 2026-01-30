@@ -32,11 +32,11 @@ jobs:
       - name: Lint
         run: pylint ${{ matrix.service }}
 
-#      - name: Test
-#        run: |
-#          if [ -d "${{ matrix.service }}/tests" ]; then
-#            pytest ${{ matrix.service }}/tests
-#          fi
+      - name: Test
+        run: |
+          if [ -d "${{ matrix.service }}/tests" ]; then
+            pytest ${{ matrix.service }}/tests
+          fi
 
       - uses: docker/login-action@v3
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
