@@ -1,0 +1,293 @@
+"""
+ReviewService: orchestration for reviewing a PR against Issue, diff, CI, Chroma.
+"""
+import logging
+from typing import Optional
+
+from langchain_core.language_models import BaseChatModel
+
+from ..config import ReviewAgentConfig
+from ..models import (
+    ReviewInput,
+    ReviewResult,
+    ReviewError,
+    ReviewSummaryOutput,
+)
+from ..clients import (
+    GitHubClient,
+    ChromaClient,
+    create_chat_model,
+    get_langfuse_callback,
+    parse_coding_summary_from_pr_body,
+    parse_issue_number_from_pr,
+)
+from ..chains import create_review_chain, create_errors_chain
+from ..embedding import embed, cosine_similarity
+
+logger = logging.getLogger(__name__)
+
+
+def _format_ci_status(check_runs: list[dict]) -> str:
+    """Format check runs for the prompt."""
+    if not check_runs:
+        return "No check runs reported for this commit."
+    lines = []
+    for run in check_runs:
+        name = run.get("name", "unknown")
+        status = run.get("status", "unknown")
+        conclusion = run.get("conclusion") or "pending"
+        lines.append(f"- {name}: status={status}, conclusion={conclusion}")
+    return "\n".join(lines)
+
+
+def _ci_passed(check_runs: list[dict], ci_required: bool) -> bool:
+    """True if all check runs are success/neutral/skipped; if no runs, return not ci_required."""
+    if not check_runs:
+        return not ci_required
+    for run in check_runs:
+        conclusion = (run.get("conclusion") or "").lower()
+        if conclusion not in ("success", "neutral", "skipped", "cancelled"):
+            return False
+    return True
+
+
+class ReviewService:
+    """Orchestrates fetching PR/issue/diff/CI, Chroma search, review chain, similarity, errors chain."""
+
+    def __init__(self, config: ReviewAgentConfig, llm: Optional[BaseChatModel] = None, github_client: Optional[GitHubClient] = None, chroma_client: Optional[ChromaClient] = None, langfuse_callbacks: Optional[list] = None):
+        self.config = config
+        self._llm = llm or create_chat_model(config.llm)
+        self._github = github_client or GitHubClient(config.github)
+        self._chroma = chroma_client or ChromaClient(config.chroma)
+        self._langfuse_callbacks = get_langfuse_callback(config.langfuse)
+        self._review_chain = create_review_chain(self._llm)
+        self._errors_chain = create_errors_chain(self._llm)
+
+    def review_pr(self, owner: str, repo: str, pr_number: int) -> ReviewResult:
+        """
+        Run the full review pipeline for a pull request.
+
+        Returns:
+            ReviewResult with is_normal, requirements_met, ci_passed, summary_similarity, errors.
+        """
+        # 1. Fetch PR, issue, diff, check runs
+        pr = self._github.get_pull_request(owner, repo, pr_number)
+        diff = self._github.get_pull_request_diff(owner, repo, pr_number)
+        check_runs = self._github.get_check_runs_for_ref(owner, repo, pr.head_sha)
+
+        # Issue number from PR body (Closes #N) or title ([N] ...)
+        issue_number = parse_issue_number_from_pr(pr.body, pr.title) or pr_number
+        try:
+            issue_data = self._github.get_issue(owner, repo, issue_number)
+        except Exception:
+            issue_data = {
+                "title": pr.title,
+                "body": pr.body or "",
+            }
+        issue_title = issue_data.get("title", pr.title)
+        issue_body = issue_data.get("body", "") or ""
+
+        coding_agent_summary = parse_coding_summary_from_pr_body(pr.body)
+
+        # 2. Chroma search for code context
+        query_parts = [issue_title, issue_body[:500], diff[:500]]
+        query = " ".join(q for q in query_parts if q)
+        search_results = self._chroma.search(
+            query=query,
+            repo_name=repo,
+            n_results=10,
+        )
+        code_context = "\n\n".join(
+            f"**{r.file_path}** (score={r.score:.2f}):\n{r.content[:800]}"
+            for r in search_results[:8]
+        ) or "No code context from Chroma (collection may be empty)."
+
+        ci_status = _format_ci_status(check_runs)
+        ci_passed = _ci_passed(check_runs, self.config.ci_required)
+
+        # 3. Review chain
+        invoke_kwargs = {}
+        if self._langfuse_callbacks:
+            invoke_kwargs["config"] = {"callbacks": self._langfuse_callbacks}
+        coding_agent_summary_for_prompt = coding_agent_summary or "(Not provided)"
+        review_output: ReviewSummaryOutput = self._review_chain.invoke(
+            {
+                "issue_title": issue_title,
+                "issue_body": issue_body[:8000],
+                "diff": diff[:12000],
+                "ci_status": ci_status,
+                "code_context": code_context[:6000],
+                "coding_agent_summary": coding_agent_summary_for_prompt,
+            },
+            **invoke_kwargs,
+        )
+
+        reviewer_summary = review_output.reviewer_summary
+        requirements_met = review_output.requirements_met
+        issues_found = review_output.issues_found or []
+
+        # 4. Summary similarity (coding_agent vs reviewer)
+        summary_similarity = 1.0
+        if coding_agent_summary and reviewer_summary:
+            try:
+                vec_coding = embed(coding_agent_summary)
+                vec_review = embed(reviewer_summary)
+                summary_similarity = cosine_similarity(vec_coding, vec_review)
+            except Exception as e:
+                logger.warning("Embedding/similarity failed: %s", e)
+        elif not coding_agent_summary:
+            summary_similarity = 1.0  # No coding summary to compare
+
+        similarity_ok = summary_similarity >= self.config.summary_similarity_threshold
+
+        # 5. is_normal
+        is_normal = (
+            ci_passed
+            and requirements_met
+            and similarity_ok
+            and len(issues_found) == 0
+        )
+
+        # 6. If not normal, run errors chain
+        errors: list[ReviewError] = []
+        if not is_normal:
+            problems_text = "\n".join(f"- {p}" for p in issues_found)
+            if not problems_text:
+                problems_text = "CI failed or requirements not met or summary mismatch."
+            ci_details = _format_ci_status(check_runs)
+            invoke_kwargs_err = {}
+            if self._langfuse_callbacks:
+                invoke_kwargs_err["config"] = {"callbacks": self._langfuse_callbacks}
+            try:
+                errors_output = self._errors_chain.invoke(
+                    {
+                        "problems": problems_text,
+                        "diff": diff[:10000],
+                        "ci_details": ci_details[:2000],
+                    },
+                    **invoke_kwargs_err,
+                )
+                for e in errors_output.errors:
+                    errors.append(
+                        ReviewError(
+                            file_path=e.file_path,
+                            lines=e.lines,
+                            fix_summary=e.fix_summary,
+                        )
+                    )
+            except Exception as e:
+                logger.warning("Errors chain failed: %s", e)
+                if issues_found:
+                    errors.append(
+                        ReviewError(
+                            file_path="",
+                            lines=[],
+                            fix_summary="; ".join(issues_found),
+                        )
+                    )
+
+        return ReviewResult(
+            is_normal=is_normal,
+            requirements_met=requirements_met,
+            ci_passed=ci_passed,
+            summary_similarity=summary_similarity,
+            reviewer_summary=reviewer_summary,
+            coding_agent_summary=coding_agent_summary,
+            errors=errors,
+        )
+
+    def review_from_synthetic(
+        self,
+        issue_title: str,
+        issue_body: str,
+        coding_agent_summary: str,
+        *,
+        diff: str = "(No diff — plan-only review. Review based on issue and coding agent summary/plan.)",
+        ci_status: str = "No CI runs reported for this review.",
+        code_context: str = "No code context (plan-only review).",
+    ) -> ReviewResult:
+        """
+        Run the review pipeline on synthetic input (no GitHub/Chroma).
+        Used to review coding agent test issue results (summaries + plans) without a real PR.
+
+        Returns:
+            ReviewResult with is_normal, requirements_met, reviewer_summary, errors, etc.
+        """
+        invoke_kwargs = {}
+        if self._langfuse_callbacks:
+            invoke_kwargs["config"] = {"callbacks": self._langfuse_callbacks}
+        coding_agent_for_prompt = coding_agent_summary or "(Not provided)"
+        review_output: ReviewSummaryOutput = self._review_chain.invoke(
+            {
+                "issue_title": issue_title,
+                "issue_body": (issue_body or "")[:8000],
+                "diff": (diff or "")[:12000],
+                "ci_status": ci_status[:2000],
+                "code_context": code_context[:6000],
+                "coding_agent_summary": coding_agent_for_prompt,
+            },
+            **invoke_kwargs,
+        )
+        reviewer_summary = review_output.reviewer_summary
+        requirements_met = review_output.requirements_met
+        issues_found = review_output.issues_found or []
+
+        summary_similarity = 1.0
+        if coding_agent_summary and reviewer_summary:
+            try:
+                vec_coding = embed(coding_agent_summary[:4000])
+                vec_review = embed(reviewer_summary)
+                summary_similarity = cosine_similarity(vec_coding, vec_review)
+            except Exception as e:
+                logger.warning("Embedding/similarity failed: %s", e)
+        similarity_ok = summary_similarity >= self.config.summary_similarity_threshold
+        ci_passed = True  # No real CI in synthetic mode
+        is_normal = (
+            ci_passed
+            and requirements_met
+            and similarity_ok
+            and len(issues_found) == 0
+        )
+
+        errors: list[ReviewError] = []
+        if not is_normal:
+            problems_text = "\n".join(f"- {p}" for p in issues_found)
+            if not problems_text:
+                problems_text = "Requirements not met or summary mismatch."
+            try:
+                errors_output = self._errors_chain.invoke(
+                    {
+                        "problems": problems_text,
+                        "diff": (diff or "")[:10000],
+                        "ci_details": ci_status[:2000],
+                    },
+                    **invoke_kwargs,
+                )
+                for e in errors_output.errors:
+                    errors.append(
+                        ReviewError(
+                            file_path=e.file_path,
+                            lines=e.lines,
+                            fix_summary=e.fix_summary,
+                        )
+                    )
+            except Exception as e:
+                logger.warning("Errors chain failed: %s", e)
+                if issues_found:
+                    errors.append(
+                        ReviewError(
+                            file_path="",
+                            lines=[],
+                            fix_summary="; ".join(issues_found),
+                        )
+                    )
+
+        return ReviewResult(
+            is_normal=is_normal,
+            requirements_met=requirements_met,
+            ci_passed=ci_passed,
+            summary_similarity=summary_similarity,
+            reviewer_summary=reviewer_summary,
+            coding_agent_summary=coding_agent_summary,
+            errors=errors,
+        )
