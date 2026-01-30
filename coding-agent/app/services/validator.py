@@ -295,21 +295,30 @@ class Validator:
         """Run validation using docker-compose."""
         logger.info("Using docker-compose for validation")
 
-        # Build the containers
+        # Build the containers (with --no-cache to ensure fresh build)
         build_result = self._run_command(
-            "docker compose build", repo_path, timeout=600)
+            "docker compose build --no-cache", repo_path, timeout=600)
         if build_result["returncode"] != 0:
-            logger.error(f"docker compose build failed: {
-                         build_result['output'][:500]}")
+            logger.error(f"docker compose build failed: {build_result['output'][:500]}")
             return None
 
         service = commands.docker_service_name or "app"
 
-        # Run lint if available
+        # Get install command for this project type
+        install_cmd = self._get_install_command(commands.project_type, repo_path)
+
+        # Run lint if available (chain install + lint in single container)
         if commands.lint_command:
-            logger.info(f"Running linter in docker: {commands.lint_command}")
-            lint_cmd = f"docker compose run --rm {service} {commands.lint_command}"
-            lint_result = self._run_command(lint_cmd, repo_path, timeout=300)
+            if install_cmd:
+                # Chain install + lint to keep dependencies in same container
+                full_cmd = f"sh -c '{install_cmd} && {commands.lint_command}'"
+                logger.info(f"Running in docker: {install_cmd} && {commands.lint_command}")
+            else:
+                full_cmd = commands.lint_command
+                logger.info(f"Running linter in docker: {commands.lint_command}")
+
+            lint_cmd = f"docker compose run --rm {service} {full_cmd}"
+            lint_result = self._run_command(lint_cmd, repo_path, timeout=600)
             result.lint_command = lint_cmd
             result.lint_output = lint_result.get("output", "")
 
@@ -328,10 +337,17 @@ class Validator:
             else:
                 logger.info("Lint passed")
 
-        # Run tests if available
+        # Run tests if available (chain install + test in single container)
         if commands.test_command:
-            logger.info(f"Running tests in docker: {commands.test_command}")
-            test_cmd = f"docker compose run --rm {service} {commands.test_command}"
+            if install_cmd:
+                # Chain install + test to keep dependencies in same container
+                full_cmd = f"sh -c '{install_cmd} && {commands.test_command}'"
+                logger.info(f"Running in docker: {install_cmd} && {commands.test_command}")
+            else:
+                full_cmd = commands.test_command
+                logger.info(f"Running tests in docker: {commands.test_command}")
+
+            test_cmd = f"docker compose run --rm {service} {full_cmd}"
             test_result = self._run_command(test_cmd, repo_path, timeout=600)
             result.test_command = test_cmd
             result.test_output = test_result.get("output", "")
@@ -367,20 +383,29 @@ class Validator:
         repo_hash = hashlib.md5(str(repo_path).encode()).hexdigest()[:8]
         image_name = f"coding-agent-validation-{repo_hash}"
 
-        # Build the image
+        # Build the image (with --no-cache to ensure fresh build)
         logger.info(f"Building Docker image: {image_name}")
         build_result = self._run_command(
-            f"docker build -t {image_name} .", repo_path, timeout=600)
+            f"docker build --no-cache -t {image_name} .", repo_path, timeout=600)
         if build_result["returncode"] != 0:
-            logger.error(f"Docker build failed: {
-                         build_result['output'][:500]}")
+            logger.error(f"Docker build failed: {build_result['output'][:500]}")
             return None
 
+        # Get install command for this project type
+        install_cmd = self._get_install_command(commands.project_type, repo_path)
+
         try:
-            # Run lint if available
+            # Run lint if available (with dependencies install)
             if commands.lint_command:
-                logger.info(f"Running linter in docker: {commands.lint_command}")
-                lint_cmd = f"docker run --rm {image_name} {commands.lint_command}"
+                if install_cmd:
+                    # Chain install + lint in single container
+                    full_cmd = f"sh -c '{install_cmd} && {commands.lint_command}'"
+                    logger.info(f"Running in docker: {install_cmd} && {commands.lint_command}")
+                else:
+                    full_cmd = commands.lint_command
+                    logger.info(f"Running linter in docker: {commands.lint_command}")
+                
+                lint_cmd = f"docker run --rm {image_name} {full_cmd}"
                 lint_result = self._run_command(lint_cmd, repo_path, timeout=300)
                 result.lint_command = lint_cmd
                 result.lint_output = lint_result.get("output", "")
@@ -400,10 +425,17 @@ class Validator:
                 else:
                     logger.info("Lint passed")
 
-            # Run tests if available
+            # Run tests if available (with dependencies install)
             if commands.test_command:
-                logger.info(f"Running tests in docker: {commands.test_command}")
-                test_cmd = f"docker run --rm {image_name} {commands.test_command}"
+                if install_cmd:
+                    # Chain install + test in single container
+                    full_cmd = f"sh -c '{install_cmd} && {commands.test_command}'"
+                    logger.info(f"Running in docker: {install_cmd} && {commands.test_command}")
+                else:
+                    full_cmd = commands.test_command
+                    logger.info(f"Running tests in docker: {commands.test_command}")
+                
+                test_cmd = f"docker run --rm {image_name} {full_cmd}"
                 test_result = self._run_command(test_cmd, repo_path, timeout=600)
                 result.test_command = test_cmd
                 result.test_output = test_result.get("output", "")
@@ -428,6 +460,37 @@ class Validator:
         logger.info(f"Dockerfile validation complete: success={result.success}, "
                     f"lint_errors={len(result.lint_errors)}, test_errors={len(result.test_errors)}")
         return result
+
+    def _get_install_command(self, project_type: Optional[str], repo_path: Path) -> Optional[str]:
+        """Get the appropriate install command for the project type."""
+        if not project_type:
+            return None
+
+        install_commands = {
+            "javascript": "npm install",
+            "typescript": "npm install",
+            "python": "pip install -r requirements.txt",
+            "go": "go mod download",
+            "rust": "cargo fetch",
+        }
+
+        # Check for specific files to determine install command
+        if project_type in ("javascript", "typescript"):
+            if (repo_path / "yarn.lock").exists():
+                return "yarn install"
+            if (repo_path / "pnpm-lock.yaml").exists():
+                return "pnpm install"
+            if (repo_path / "package-lock.json").exists() or (repo_path / "package.json").exists():
+                return "npm install"
+        elif project_type == "python":
+            if (repo_path / "pyproject.toml").exists():
+                return "pip install -e ."
+            if (repo_path / "requirements.txt").exists():
+                return "pip install -r requirements.txt"
+            if (repo_path / "setup.py").exists():
+                return "pip install -e ."
+
+        return install_commands.get(project_type)
 
     def _is_valid_file_path(self, file_path: Optional[str]) -> bool:
         """Check if a string looks like a valid file path."""
