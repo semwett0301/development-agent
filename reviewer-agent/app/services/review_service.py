@@ -4,7 +4,7 @@ ReviewService: orchestration for reviewing a PR against Issue, diff, CI.
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
@@ -109,6 +109,7 @@ class PRResultParams:
     ci_passed: bool
     ci_status: str
     summary_similarity: float
+    errors: list[ReviewError] = field(default_factory=list)
 
 
 class ReviewService:
@@ -211,6 +212,7 @@ class ReviewService:
             ci_passed=ci_passed,
             ci_status=ci_status,
             summary_similarity=summary_similarity,
+            errors=errors,
         )
         self._handle_pr_result(pr_result_params)
 
@@ -329,16 +331,41 @@ class ReviewService:
             asyncio.run(_request_changes())
         else:
             logger.info(
-                "[review] PR #%s needs fixes → updating body (attempt %s/%s)",
+                "[review] PR #%s needs fixes → posting review with errors (attempt %s/%s)",
                 params.pr_number,
                 params.review_count,
                 self.MAX_REVIEW_ATTEMPTS,
             )
+            comment = self._format_errors_comment(params)
 
-            async def _update():
+            async def _update_and_comment():
                 await self._github.update_pull_request(
                     params.owner, params.repo, params.pr_number, updated_body)
-            asyncio.run(_update())
+                await self._github.request_changes(
+                    params.owner, params.repo, params.pr_number, comment)
+            asyncio.run(_update_and_comment())
+
+    @staticmethod
+    def _format_errors_comment(params: PRResultParams) -> str:
+        """Format review errors into a GitHub review comment."""
+        lines = [
+            f"**Reviewer Agent** — attempt #{
+                params.review_count}/{MAX_REVIEW_ATTEMPTS}\n",
+        ]
+        if not params.ci_passed:
+            lines.append("**CI status:** Failed\n")
+        if params.errors:
+            lines.append("### Issues found\n")
+            for err in params.errors:
+                location = f"`{err.file_path}`" if err.file_path else "General"
+                if err.lines:
+                    location += f" (lines {', '.join(str(l)
+                                                     for l in err.lines)})"
+                lines.append(f"- {location}: {err.fix_summary}")
+        else:
+            lines.append(
+                "Review detected issues but could not extract structured errors.")
+        return "\n".join(lines)
 
     def _fetch_issue_context(self, owner: str, repo: str, issue_number: int, pr) -> tuple[str, str]:
         """Fetch issue title and body, falling back to PR data."""
