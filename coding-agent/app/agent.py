@@ -5,7 +5,6 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from langfuse import update_current_trace
 
 from .config import AgentConfig, load_config
 from .models import Issue, IssueSummary, ActionPlan, StepStatus
@@ -266,6 +265,8 @@ def run_agent(
         config: Optional agent configuration
     """
     try:
+        from langfuse import update_current_trace
+
         update_current_trace(session_id=f"{repo}#{issue_number}")
     except ImportError:
         pass
