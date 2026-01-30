@@ -71,6 +71,16 @@ class Validator:
                     result.lint_output,
                     commands.project_type,
                 )
+                # Fallback: if command failed but no errors parsed, add generic error
+                if not result.lint_errors:
+                    output_snippet = result.lint_output[:500] if result.lint_output.strip() else "(no output)"
+                    result.lint_errors = [LintError(
+                        file_path="unknown",
+                        line=0,
+                        column=0,
+                        message=f"Linter failed with exit code {lint_result['returncode']}. Output: {output_snippet}",
+                        rule="lint-failure",
+                    )]
         else:
             logger.warning("No lint command found, skipping linting")
 
@@ -87,6 +97,15 @@ class Validator:
                     result.test_output,
                     commands.project_type,
                 )
+                # Fallback: if command failed but no errors parsed, add generic error
+                if not result.test_errors:
+                    traceback = result.test_output[-1500:] if result.test_output.strip() else "(no output)"
+                    result.test_errors = [TestError(
+                        test_name="unknown",
+                        file_path=None,
+                        message=f"Tests failed with exit code {test_result['returncode']}",
+                        traceback=traceback,
+                    )]
         else:
             logger.warning("No test command found, skipping tests")
 
