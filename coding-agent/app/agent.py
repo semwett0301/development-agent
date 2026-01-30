@@ -14,8 +14,6 @@ from .services import (
     IssueProcessor,
     CodeSearchService,
     CodeGenerator,
-    ConfigFinder,
-    Validator,
     GitService,
 )
 
@@ -61,9 +59,6 @@ class CodingAgent:
         self.code_search = CodeSearchService()
         self.code_generator = CodeGenerator(
             llm, langfuse_callbacks=langfuse_callbacks)
-        self.config_finder = ConfigFinder()
-        self.validator = Validator(
-            llm, self.config_finder, langfuse_callbacks=langfuse_callbacks)
         self.git_service = GitService(self.github_client, self.config.work_dir)
 
     def process_issue(
@@ -123,15 +118,7 @@ class CodingAgent:
             )
             result.files_changed = files_changed
 
-            logger.info("Step 6: Validating changes...")
-            validation_success = self._validate_and_fix(repo_path)
-
-            if not validation_success:
-                result.error = "Validation failed after max retries"
-                logger.error(result.error)
-                return result
-
-            logger.info("Step 7: Committing changes...")
+            logger.info("Step 6: Committing changes...")
             commit_message = self.issue_processor.create_commit_message(
                 summary=summary,
                 changes_description=f"Changed {len(files_changed)} files",
@@ -142,7 +129,7 @@ class CodingAgent:
                 message=commit_message,
             )
 
-            logger.info("Step 8: Creating pull request...")
+            logger.info("Step 7: Creating pull request...")
             pr = self.git_service.push_and_create_pr(
                 repo=repo,
                 issue_number=issue_number,
@@ -206,43 +193,6 @@ class CodingAgent:
                 plan.mark_step_failed(step.id, str(e))
 
         return list(set(all_files_changed))
-
-    def _validate_and_fix(self, repo_path: Path) -> bool:
-        """Run validation and fix errors with retries."""
-        commands = self.config_finder.find_commands(repo_path)
-
-        # Install dependencies first
-        logger.info(f"Installing dependencies for {
-                    commands.project_type} project...")
-        if not self.validator.install_dependencies(repo_path, commands):
-            logger.warning(
-                "Dependency installation failed, continuing with validation anyway")
-
-        for attempt in range(1, self.config.max_fix_attempts + 1):
-            logger.info(f"Validation attempt {
-                attempt}/{self.config.max_fix_attempts}")
-
-            result = self.validator.validate(repo_path, commands)
-
-            if result.success:
-                logger.info("Validation passed!")
-                return True
-
-            logger.warning(f"Validation failed: {len(result.lint_errors)} lint errors, "
-                           f"{len(result.test_errors)} test failures")
-
-            if attempt < self.config.max_fix_attempts:
-                logger.info("Attempting to fix errors...")
-                fixes = self.validator.fix_errors(result, repo_path)
-
-                if fixes.fixes:
-                    fixed_files = self.validator.apply_fixes(fixes, repo_path)
-                    logger.info(f"Applied fixes to {len(fixed_files)} files")
-                else:
-                    logger.warning("No fixes generated")
-                    break
-
-        return False
 
 
 @observe()
