@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from langfuse import observe
 
 from .config import AgentConfig, load_config
 from .models import Issue, IssueSummary, ActionPlan, StepStatus
@@ -239,16 +240,7 @@ class CodingAgent:
         return False
 
 
-def _observe_if_available(fn):
-    """Wrap in Langfuse @observe when available."""
-    try:
-        from langfuse import observe
-        return observe(name="coding_agent_run")(fn)
-    except ImportError:
-        return fn
-
-
-@_observe_if_available
+@observe()
 def run_agent(
     repo: str,
     issue_number: int,
@@ -264,26 +256,29 @@ def run_agent(
         base_branch: Branch to base changes on
         config: Optional agent configuration
     """
+
+    def _execute() -> AgentResult:
+        agent = CodingAgent(config)
+
+        issue_data = agent.github_client.get_issue(repo, issue_number)
+
+        issue = Issue(
+            title=issue_data.title,
+            body=issue_data.body,
+            labels=issue_data.labels,
+        )
+
+        result = agent.process_issue(issue, repo, issue_number, base_branch)
+
+        if agent.config.langfuse and agent.config.langfuse.is_configured:
+            flush_langfuse()
+
+        return result
+
     try:
-        from langfuse import update_current_trace
-
-        update_current_trace(session_id=f"{repo}#{issue_number}")
+        return observe(
+            name="coding_agent_run",
+            session_id=f"{repo}#{issue_number}",
+        )(_execute)()
     except ImportError:
-        pass
-
-    agent = CodingAgent(config)
-
-    issue_data = agent.github_client.get_issue(repo, issue_number)
-
-    issue = Issue(
-        title=issue_data.title,
-        body=issue_data.body,
-        labels=issue_data.labels,
-    )
-
-    result = agent.process_issue(issue, repo, issue_number, base_branch)
-
-    if agent.config.langfuse and agent.config.langfuse.is_configured:
-        flush_langfuse()
-
-    return result
+        return _execute()

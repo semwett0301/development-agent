@@ -50,12 +50,13 @@ async def run_agent_async(repo: str, issue_number: int):
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
-            lambda: run_agent(repo=repo, issue_number=issue_number)
+            lambda: run_agent(repo=repo, issue_number=issue_number,
+                              langfuse_trace_id=f"{repo}/{issue_number}")
         )
 
         if result.success:
             logger.info(f"Agent completed successfully: PR {
-                        result.pull_request.url}")
+                result.pull_request.url}")
         else:
             logger.error(f"Agent failed: {result.error}")
 
