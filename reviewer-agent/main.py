@@ -1,5 +1,5 @@
 """
-Reviewing Agent — review PRs against Issue, diff, CI, and Chroma context.
+Reviewing Agent — review PRs against Issue, diff, and CI.
 
 Usage:
   python -m reviewing_agent.main --owner OWNER --repo REPO --pr PR_NUMBER

@@ -1,5 +1,5 @@
 """
-ReviewService: orchestration for reviewing a PR against Issue, diff, CI, Chroma.
+ReviewService: orchestration for reviewing a PR against Issue, diff, CI.
 """
 import logging
 from typing import Optional
@@ -8,14 +8,12 @@ from langchain_core.language_models import BaseChatModel
 
 from ..config import ReviewAgentConfig
 from ..models import (
-    ReviewInput,
     ReviewResult,
     ReviewError,
     ReviewSummaryOutput,
 )
 from ..clients import (
     GitHubClient,
-    ChromaClient,
     create_chat_model,
     get_langfuse_callback,
     parse_coding_summary_from_pr_body,
@@ -52,13 +50,13 @@ def _ci_passed(check_runs: list[dict], ci_required: bool) -> bool:
 
 
 class ReviewService:
-    """Orchestrates fetching PR/issue/diff/CI, Chroma search, review chain, similarity, errors chain."""
+    """Orchestrates fetching PR/issue/diff/CI, review chain, similarity, errors chain."""
 
-    def __init__(self, config: ReviewAgentConfig, llm: Optional[BaseChatModel] = None, github_client: Optional[GitHubClient] = None, chroma_client: Optional[ChromaClient] = None, langfuse_callbacks: Optional[list] = None):
+    def __init__(self, config: ReviewAgentConfig, llm: Optional[BaseChatModel] = None,
+                 github_client: Optional[GitHubClient] = None):
         self.config = config
         self._llm = llm or create_chat_model(config.llm)
         self._github = github_client or GitHubClient(config.github)
-        self._chroma = chroma_client or ChromaClient(config.chroma)
         self._langfuse_callbacks = get_langfuse_callback(config.langfuse)
         self._review_chain = create_review_chain(self._llm)
         self._errors_chain = create_errors_chain(self._llm)
@@ -82,9 +80,7 @@ class ReviewService:
             owner, repo, issue_number, pr)
         coding_agent_summary = parse_coding_summary_from_pr_body(pr.body)
 
-        # 2. Chroma search for code context
-        code_context = self._search_code_context(
-            issue_title, issue_body, diff, repo)
+        code_context = "No code context available."
 
         ci_status = _format_ci_status(check_runs)
         ci_passed = _ci_passed(check_runs, self.config.ci_required)
@@ -131,17 +127,6 @@ class ReviewService:
         except Exception:
             issue_data = {"title": pr.title, "body": pr.body or ""}
         return issue_data.get("title", pr.title), issue_data.get("body", "") or ""
-
-    def _search_code_context(self, issue_title: str, issue_body: str, diff: str, repo: str) -> str:
-        """Search Chroma for relevant code context."""
-        query_parts = [issue_title, issue_body[:500], diff[:500]]
-        query = " ".join(q for q in query_parts if q)
-        search_results = self._chroma.search(
-            query=query, repo_name=repo, n_results=10)
-        return "\n\n".join(
-            f"**{r.file_path}** (score={r.score:.2f}):\n{r.content[:800]}"
-            for r in search_results[:8]
-        ) or "No code context from Chroma (collection may be empty)."
 
     def _run_review_chain(self, issue_title: str, issue_body: str, diff: str,
                           ci_status: str, code_context: str,
@@ -210,10 +195,10 @@ class ReviewService:
         *,
         diff: str = "(No diff — plan-only review. Review based on issue and coding agent summary/plan.)",
         ci_status: str = "No CI runs reported for this review.",
-        code_context: str = "No code context (plan-only review).",
+        code_context: str = "No code context available.",
     ) -> ReviewResult:
         """
-        Run the review pipeline on synthetic input (no GitHub/Chroma).
+        Run the review pipeline on synthetic input (no GitHub).
         Used to review coding agent test issue results (summaries + plans) without a real PR.
 
         Returns:

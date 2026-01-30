@@ -7,9 +7,9 @@ A multi-agent system with a microservices architecture for automating software d
 ```
 development-agent/
 ├── coding-agent/       # Agent for code generation and transformation
-├── indexer-service/    # Service for indexing and retrieval
 ├── proxy-service/      # Gateway and routing service
 ├── reviewer-agent/     # Agent for automated code review
+├── webhook-service/    # GitHub webhook handler
 ```
 
 ## Services
@@ -17,9 +17,9 @@ development-agent/
 | Service          | Port   | Description                               |
 |------------------|--------|-------------------------------------------|
 | coding-agent     | `8001` | Agent for code generation and transformation |
-| indexer-service   | `8002` | Service for indexing and retrieval         |
-| proxy-service     | `8003` | Gateway and routing service               |
-| reviewer-agent    | `8004` | Agent for automated code review           |
+| proxy-service    | `8003` | Gateway and routing service               |
+| reviewer-agent   | `8004` | Agent for automated code review           |
+| webhook-service  | `8005` | GitHub webhook handler                    |
 
 ## Getting Started
 
@@ -51,7 +51,6 @@ This will start:
 |------------|--------|------------------------|
 | PostgreSQL | `5432` | Primary database       |
 | Kafka      | `9092` | Message broker (KRaft) |
-| Chroma     | `8000` | Vector database        |
 
 ## Commit Convention
 
@@ -77,9 +76,9 @@ This project follows the [Conventional Commits](https://www.conventionalcommits.
 | Scope      | Description          |
 |------------|----------------------|
 | `coding`   | coding-agent         |
-| `indexer`  | indexer-service      |
 | `proxy`    | proxy-service        |
 | `reviewer` | reviewer-agent       |
+| `webhook`  | webhook-service      |
 
 Scope is optional and can be omitted for cross-cutting changes.
 

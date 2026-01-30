@@ -35,18 +35,6 @@ class GitHubConfig:
 
 
 @dataclass
-class ChromaConfig:
-    """Chroma vector database configuration."""
-    host: str = "localhost"
-    port: int = 8000
-    collection_name: str = "codebase"
-
-    @property
-    def url(self) -> str:
-        return f"http://{self.host}:{self.port}"
-
-
-@dataclass
 class LangfuseConfig:
     """Langfuse observability configuration."""
     public_key: Optional[str] = None
@@ -71,7 +59,6 @@ class ReviewAgentConfig:
     """Reviewing Agent configuration."""
     llm: LLMConfig = field(default_factory=LLMConfig)
     github: GitHubConfig = field(default_factory=GitHubConfig)
-    chroma: ChromaConfig = field(default_factory=ChromaConfig)
     langfuse: Optional[LangfuseConfig] = None
 
     # Review behavior
@@ -98,10 +85,6 @@ def load_config() -> ReviewAgentConfig:
             temperature=float(os.getenv("LLM_TEMPERATURE", "0.1")),
         ),
         github=GitHubConfig(),
-        chroma=ChromaConfig(
-            host=os.getenv("CHROMA_HOST", "localhost"),
-            port=int(os.getenv("CHROMA_PORT", "8000")),
-        ),
         langfuse=langfuse if langfuse.is_configured else None,
         summary_similarity_threshold=float(
             os.getenv("REVIEW_SUMMARY_SIMILARITY_THRESHOLD", "0.45")

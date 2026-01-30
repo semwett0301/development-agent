@@ -52,23 +52,95 @@ async def test_issue_created_sends_to_coding_events(client, mock_send):
     assert value["issue_number"] == 42
 
 
-async def test_push_to_main_sends_to_index_events(client, mock_send):
-    payload = json.dumps({"ref": "refs/heads/main"}).encode()
+async def test_pr_review_comment_sends_redo(client, mock_send):
+    payload = json.dumps({
+        "action": "created",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {
+            "number": 123,
+            "body": "Closes #42",
+        },
+        "comment": {"body": "Please fix this"},
+    }).encode()
 
-    response = await client.post("/github/webhook/", content=payload, headers=_headers("push", payload))
+    response = await client.post(
+        "/github/webhook/", content=payload,
+        headers=_headers("pull_request_review_comment", payload))
 
     assert response.status_code == 200
 
     mock_send.assert_called_once()
     call_kwargs = mock_send.call_args.kwargs
-    assert call_kwargs["topic"] == "index-events"
-    assert call_kwargs["value"] == b""
+    assert call_kwargs["topic"] == "coding-events"
+    assert call_kwargs["key"] == "pull_request_review_comment"
+
+    value = json.loads(call_kwargs["value"])
+    assert value["type"] == "REDO"
+    assert value["repository"] == "owner/repo"
+    assert value["issue_number"] == 42
+    assert value["pull_request_number"] == 123
 
 
-async def test_push_to_non_main_does_not_send(client, mock_send):
-    payload = json.dumps({"ref": "refs/heads/feature"}).encode()
+async def test_pr_review_comment_uses_pr_number_if_no_issue(client, mock_send):
+    payload = json.dumps({
+        "action": "created",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {
+            "number": 99,
+            "body": "Some changes without issue link",
+        },
+        "comment": {"body": "Fix this"},
+    }).encode()
 
-    response = await client.post("/github/webhook/", content=payload, headers=_headers("push", payload))
+    response = await client.post(
+        "/github/webhook/", content=payload,
+        headers=_headers("pull_request_review_comment", payload))
+
+    assert response.status_code == 200
+
+    value = json.loads(mock_send.call_args.kwargs["value"])
+    assert value["type"] == "REDO"
+    assert value["issue_number"] == 99
+    assert value["pull_request_number"] == 99
+
+
+async def test_check_suite_completed_sends_to_review_events(client, mock_send):
+    payload = json.dumps({
+        "action": "completed",
+        "repository": {"full_name": "owner/repo"},
+        "check_suite": {
+            "pull_requests": [{"number": 123}],
+        },
+    }).encode()
+
+    response = await client.post(
+        "/github/webhook/", content=payload,
+        headers=_headers("check_suite", payload))
+
+    assert response.status_code == 200
+
+    mock_send.assert_called_once()
+    call_kwargs = mock_send.call_args.kwargs
+    assert call_kwargs["topic"] == "review-events"
+    assert call_kwargs["key"] == "check_suite"
+
+    value = json.loads(call_kwargs["value"])
+    assert value["repository"] == "owner/repo"
+    assert value["pull_request_number"] == 123
+
+
+async def test_check_suite_completed_no_prs_does_not_send(client, mock_send):
+    payload = json.dumps({
+        "action": "completed",
+        "repository": {"full_name": "owner/repo"},
+        "check_suite": {
+            "pull_requests": [],
+        },
+    }).encode()
+
+    response = await client.post(
+        "/github/webhook/", content=payload,
+        headers=_headers("check_suite", payload))
 
     assert response.status_code == 200
     mock_send.assert_not_called()

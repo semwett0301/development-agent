@@ -272,7 +272,7 @@ class Validator:
     def _validate_with_docker(self, repo_path: Path, commands: ProjectCommands) -> Optional[ValidationResult]:
         """
         Run validation inside a generic Docker container with mounted code.
-        
+
         Instead of using project's docker-compose (which may have databases, etc.),
         we create a simple container with just the tools needed for lint/test.
 
@@ -305,17 +305,17 @@ class Validator:
         Returns list of created files.
         """
         created_files = []
-        
+
         # Find .env.example or .env.template files
         env_templates = list(repo_path.glob("**/.env.example")) + \
-                        list(repo_path.glob("**/.env.template")) + \
-                        list(repo_path.glob("**/.env.sample"))
-        
+            list(repo_path.glob("**/.env.template")) + \
+            list(repo_path.glob("**/.env.sample"))
+
         for template in env_templates:
             # Skip node_modules
             if "node_modules" in str(template):
                 continue
-            
+
             env_file = template.parent / ".env"
             if not env_file.exists():
                 try:
@@ -326,36 +326,113 @@ class Validator:
                     created_files.append(rel_path)
                     logger.info(f"Created {rel_path} from {template.name}")
                 except Exception as e:
-                    logger.warning(f"Failed to create .env from {template}: {e}")
-        
+                    logger.warning(f"Failed to create .env from {
+                                   template}: {e}")
+
         # Also check docker-compose for env_file references
-        compose_files = ["docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]
+        compose_files = ["docker-compose.yml",
+                         "docker-compose.yaml", "compose.yml", "compose.yaml"]
         for compose_name in compose_files:
             compose_path = repo_path / compose_name
             if compose_path.exists():
                 try:
                     content = compose_path.read_text()
                     # Find env_file references
-                    import re
-                    env_refs = re.findall(r'env_file:\s*(?:-\s*)?["\']?([^"\'\n]+)["\']?', content)
+                    env_refs = re.findall(
+                        r'env_file:\s*(?:-\s*)?["\']?([^"\'\n]+)["\']?', content)
                     for env_ref in env_refs:
                         env_path = repo_path / env_ref.strip()
                         if not env_path.exists():
                             # Create empty .env file
                             env_path.parent.mkdir(parents=True, exist_ok=True)
-                            env_path.write_text("# Auto-generated placeholder\nNODE_ENV=development\n")
+                            env_path.write_text(
+                                "# Auto-generated placeholder\nNODE_ENV=development\n")
                             rel_path = str(env_path.relative_to(repo_path))
                             created_files.append(rel_path)
                             logger.info(f"Created placeholder {rel_path}")
                 except Exception as e:
                     logger.warning(f"Failed to parse {compose_name}: {e}")
-        
+
         return created_files
+
+    def _run_lint_in_container(
+        self, container_name: str, lint_command: str, install_cmd: Optional[str],
+        pm_install: str, repo_path: Path, project_type: str, result: ValidationResult
+    ) -> None:
+        """Run lint command in container and update result."""
+        if install_cmd:
+            full_cmd = f"{pm_install}{install_cmd} && {lint_command}"
+        else:
+            full_cmd = f"{pm_install}{lint_command}"
+
+        logger.info(f"Running lint: {full_cmd}")
+        docker_cmd = f'docker exec {container_name} sh -c "{full_cmd}"'
+        lint_result = self._run_command(docker_cmd, repo_path, timeout=600)
+        result.lint_command = docker_cmd
+        result.lint_output = lint_result.get("output", "")
+        self._process_lint_result(lint_result, project_type, result)
+
+    def _run_tests_in_container(
+        self, container_name: str, test_command: str, cmd_prefix: str,
+        repo_path: Path, project_type: str, result: ValidationResult
+    ) -> None:
+        """Run test command in container and update result."""
+        full_cmd = f"{cmd_prefix}{
+            test_command}" if cmd_prefix else test_command
+
+        logger.info(f"Running tests: {full_cmd}")
+        docker_cmd = f'docker exec {container_name} sh -c "{full_cmd}"'
+        test_result = self._run_command(docker_cmd, repo_path, timeout=600)
+        result.test_command = docker_cmd
+        result.test_output = test_result.get("output", "")
+        self._process_test_result(test_result, project_type, result)
+
+    def _process_lint_result(
+        self, lint_result: dict, project_type: str, result: ValidationResult, docker_label: str = ""
+    ) -> None:
+        """Process lint result and update ValidationResult."""
+        logger.info(f"Lint result: exit={lint_result['returncode']}, "
+                    f"output_len={len(result.lint_output)}")
+        if lint_result["returncode"] != 0:
+            logger.warning(f"Lint output: {result.lint_output[:1000]}")
+            result.success = False
+            result.lint_errors = self._parse_lint_errors(
+                result.lint_output, project_type)
+            logger.info(f"Parsed {len(result.lint_errors)} lint errors")
+            if not result.lint_errors:
+                msg = f"Linter failed{docker_label}. Output: {
+                    result.lint_output[:500]}"
+                result.lint_errors = [LintError(
+                    file_path="unknown", line=0, column=0, message=msg, rule="lint-failure",
+                )]
+        else:
+            logger.info("Lint passed")
+
+    def _process_test_result(
+        self, test_result: dict, project_type: str, result: ValidationResult, docker_label: str = ""
+    ) -> None:
+        """Process test result and update ValidationResult."""
+        logger.info(f"Test result: exit={test_result['returncode']}, "
+                    f"output_len={len(result.test_output)}")
+        if test_result["returncode"] != 0:
+            logger.warning(f"Test output: {result.test_output[:1000]}")
+            result.success = False
+            result.test_errors = self._parse_test_errors(
+                result.test_output, project_type)
+            logger.info(f"Parsed {len(result.test_errors)} test errors")
+            if not result.test_errors:
+                result.test_errors = [TestError(
+                    test_name="unknown", file_path=None,
+                    message=f"Tests failed{docker_label}",
+                    traceback=result.test_output[-1500:],
+                )]
+        else:
+            logger.info("Tests passed")
 
     def _validate_with_generic_container(self, repo_path: Path, commands: ProjectCommands) -> Optional[ValidationResult]:
         """
         Run validation in a generic container using docker cp (for Docker-in-Docker compatibility).
-        
+
         This approach:
         1. Creates a container with the right image
         2. Copies code into the container using docker cp
@@ -363,7 +440,7 @@ class Validator:
         4. Cleans up the container
         """
         result = ValidationResult(success=True)
-        
+
         project_type = commands.project_type or "javascript"
         image = self._get_docker_image_for_project(project_type)
         logger.info(f"Using generic container for validation: {image}")
@@ -375,8 +452,10 @@ class Validator:
 
         # Get install command and convert npm commands to correct package manager
         install_cmd = self._get_install_command(project_type, repo_path)
-        lint_command = self._convert_npm_command(commands.lint_command, repo_path) if commands.lint_command else None
-        test_command = self._convert_npm_command(commands.test_command, repo_path) if commands.test_command else None
+        lint_command = self._convert_npm_command(
+            commands.lint_command, repo_path) if commands.lint_command else None
+        test_command = self._convert_npm_command(
+            commands.test_command, repo_path) if commands.test_command else None
 
         # For pnpm/yarn we need to install them first in alpine
         pm = self._detect_js_package_manager(repo_path)
@@ -389,20 +468,23 @@ class Validator:
 
         # Create a unique container name
         import hashlib
-        container_name = f"validation-{hashlib.md5(str(repo_path).encode()).hexdigest()[:8]}"
-        
+        container_name = f"validation-{hashlib.md5(
+            str(repo_path).encode()).hexdigest()[:8]}"
+
         # Remove any existing container with same name
-        self._run_command(f'docker rm -f {container_name}', repo_path, timeout=30)
-        
+        self._run_command(
+            f'docker rm -f {container_name}', repo_path, timeout=30)
+
         # Create container with working directory /app
         create_result = self._run_command(
             f'docker create --name {container_name} -w /app {image} sleep infinity',
             repo_path, timeout=60
         )
         if create_result["returncode"] != 0:
-            logger.error(f"Failed to create container: {create_result['output']}")
+            logger.error(f"Failed to create container: {
+                         create_result['output']}")
             return None
-        
+
         try:
             # Copy code into container
             logger.info("Copying code into container...")
@@ -413,89 +495,49 @@ class Validator:
             if copy_result["returncode"] != 0:
                 logger.error(f"Failed to copy code: {copy_result['output']}")
                 return None
-            
+
             # Start the container
             start_result = self._run_command(
                 f'docker start {container_name}',
                 repo_path, timeout=30
             )
             if start_result["returncode"] != 0:
-                logger.error(f"Failed to start container: {start_result['output']}")
+                logger.error(f"Failed to start container: {
+                             start_result['output']}")
                 return None
-            
+
             logger.info(f"Container {container_name} started")
 
             # Run lint if available
             if lint_command:
-                if install_cmd:
-                    full_cmd = f"{pm_install}{install_cmd} && {lint_command}"
-                else:
-                    full_cmd = f"{pm_install}{lint_command}"
-                
-                logger.info(f"Running lint: {full_cmd}")
-                docker_cmd = f'docker exec {container_name} sh -c "{full_cmd}"'
-                lint_result = self._run_command(docker_cmd, repo_path, timeout=600)
-                result.lint_command = docker_cmd
-                result.lint_output = lint_result.get("output", "")
-
-                logger.info(f"Lint result: exit={lint_result['returncode']}, output_len={len(result.lint_output)}")
-                if lint_result["returncode"] != 0:
-                    logger.warning(f"Lint output: {result.lint_output[:1000]}")
-                    result.success = False
-                    result.lint_errors = self._parse_lint_errors(
-                        result.lint_output, project_type)
-                    logger.info(f"Parsed {len(result.lint_errors)} lint errors")
-                    if not result.lint_errors:
-                        result.lint_errors = [LintError(
-                            file_path="unknown", line=0, column=0,
-                            message=f"Linter failed. Output: {result.lint_output[:500]}",
-                            rule="lint-failure",
-                        )]
-                else:
-                    logger.info("Lint passed")
+                self._run_lint_in_container(
+                    container_name, lint_command, install_cmd,
+                    pm_install, repo_path, project_type, result
+                )
 
             # Run tests if available (reuse installed dependencies)
             if test_command:
-                # Don't reinstall if lint already ran
-                if lint_command and result.lint_output:
-                    # Dependencies already installed during lint
-                    full_cmd = test_command
+                already_installed = bool(lint_command and result.lint_output)
+                if already_installed:
+                    cmd_prefix = ""
+                elif install_cmd:
+                    cmd_prefix = f"{pm_install}{install_cmd} && "
                 else:
-                    if install_cmd:
-                        full_cmd = f"{pm_install}{install_cmd} && {test_command}"
-                    else:
-                        full_cmd = f"{pm_install}{test_command}"
-                
-                logger.info(f"Running tests: {full_cmd}")
-                docker_cmd = f'docker exec {container_name} sh -c "{full_cmd}"'
-                test_result = self._run_command(docker_cmd, repo_path, timeout=600)
-                result.test_command = docker_cmd
-                result.test_output = test_result.get("output", "")
-
-                logger.info(f"Test result: exit={test_result['returncode']}, output_len={len(result.test_output)}")
-                if test_result["returncode"] != 0:
-                    logger.warning(f"Test output: {result.test_output[:1000]}")
-                    result.success = False
-                    result.test_errors = self._parse_test_errors(
-                        result.test_output, project_type)
-                    logger.info(f"Parsed {len(result.test_errors)} test errors")
-                    if not result.test_errors:
-                        result.test_errors = [TestError(
-                            test_name="unknown", file_path=None,
-                            message="Tests failed",
-                            traceback=result.test_output[-1500:],
-                        )]
-                else:
-                    logger.info("Tests passed")
+                    cmd_prefix = pm_install
+                self._run_tests_in_container(
+                    container_name, test_command, cmd_prefix,
+                    repo_path, project_type, result
+                )
 
             logger.info(f"Validation complete: success={result.success}, "
                         f"lint_errors={len(result.lint_errors)}, test_errors={len(result.test_errors)}")
             return result
-            
+
         finally:
             # Cleanup container
             logger.info(f"Cleaning up container {container_name}")
-            self._run_command(f'docker rm -f {container_name}', repo_path, timeout=30)
+            self._run_command(
+                f'docker rm -f {container_name}', repo_path, timeout=30)
 
     def _validate_with_compose(self, repo_path: Path, commands: ProjectCommands, result: ValidationResult) -> Optional[ValidationResult]:
         """Run validation using docker-compose."""
@@ -505,24 +547,28 @@ class Validator:
         build_result = self._run_command(
             "docker compose build --no-cache", repo_path, timeout=600)
         if build_result["returncode"] != 0:
-            logger.error(f"docker compose build failed: {build_result['output'][:500]}")
+            logger.error(f"docker compose build failed: {
+                         build_result['output'][:500]}")
             return None
 
         service = commands.docker_service_name or "app"
 
         # Get install command for this project type
-        install_cmd = self._get_install_command(commands.project_type, repo_path)
+        install_cmd = self._get_install_command(
+            commands.project_type, repo_path)
 
         # Convert npm commands to the correct package manager (yarn/pnpm)
-        lint_command = self._convert_npm_command(commands.lint_command, repo_path) if commands.lint_command else None
-        test_command = self._convert_npm_command(commands.test_command, repo_path) if commands.test_command else None
+        lint_command = self._convert_npm_command(
+            commands.lint_command, repo_path) if commands.lint_command else None
+        test_command = self._convert_npm_command(
+            commands.test_command, repo_path) if commands.test_command else None
 
         # Run lint if available (chain install + lint in single container)
         if lint_command:
             if install_cmd:
-                # Chain install + lint to keep dependencies in same container
                 full_cmd = f"sh -c '{install_cmd} && {lint_command}'"
-                logger.info(f"Running in docker: {install_cmd} && {lint_command}")
+                logger.info(f"Running in docker: {
+                            install_cmd} && {lint_command}")
             else:
                 full_cmd = lint_command
                 logger.info(f"Running linter in docker: {lint_command}")
@@ -531,30 +577,15 @@ class Validator:
             lint_result = self._run_command(lint_cmd, repo_path, timeout=600)
             result.lint_command = lint_cmd
             result.lint_output = lint_result.get("output", "")
-
-            logger.info(f"Lint result: exit={lint_result['returncode']}, output_len={len(result.lint_output)}")
-            if lint_result["returncode"] != 0:
-                # Log full output for debugging
-                logger.warning(f"Lint output: {result.lint_output[:1000]}")
-                result.success = False
-                result.lint_errors = self._parse_lint_errors(
-                    result.lint_output, commands.project_type)
-                logger.info(f"Parsed {len(result.lint_errors)} lint errors")
-                if not result.lint_errors:
-                    result.lint_errors = [LintError(
-                        file_path="unknown", line=0, column=0,
-                        message=f"Linter failed in Docker. Output: {result.lint_output[:500]}",
-                        rule="docker-lint-failure",
-                    )]
-            else:
-                logger.info("Lint passed")
+            self._process_lint_result(
+                lint_result, commands.project_type, result, " in Docker")
 
         # Run tests if available (chain install + test in single container)
         if test_command:
             if install_cmd:
-                # Chain install + test to keep dependencies in same container
                 full_cmd = f"sh -c '{install_cmd} && {test_command}'"
-                logger.info(f"Running in docker: {install_cmd} && {test_command}")
+                logger.info(f"Running in docker: {
+                            install_cmd} && {test_command}")
             else:
                 full_cmd = test_command
                 logger.info(f"Running tests in docker: {test_command}")
@@ -563,23 +594,8 @@ class Validator:
             test_result = self._run_command(test_cmd, repo_path, timeout=600)
             result.test_command = test_cmd
             result.test_output = test_result.get("output", "")
-
-            logger.info(f"Test result: exit={test_result['returncode']}, output_len={len(result.test_output)}")
-            if test_result["returncode"] != 0:
-                # Log full output for debugging
-                logger.warning(f"Test output: {result.test_output[:1000]}")
-                result.success = False
-                result.test_errors = self._parse_test_errors(
-                    result.test_output, commands.project_type)
-                logger.info(f"Parsed {len(result.test_errors)} test errors")
-                if not result.test_errors:
-                    result.test_errors = [TestError(
-                        test_name="unknown", file_path=None,
-                        message="Tests failed in Docker",
-                        traceback=result.test_output[-1500:],
-                    )]
-            else:
-                logger.info("Tests passed")
+            self._process_test_result(
+                test_result, commands.project_type, result, " in Docker")
 
         # Cleanup
         self._run_command("docker compose down", repo_path, timeout=60)
@@ -602,78 +618,61 @@ class Validator:
         build_result = self._run_command(
             f"docker build --no-cache -t {image_name} .", repo_path, timeout=600)
         if build_result["returncode"] != 0:
-            logger.error(f"Docker build failed: {build_result['output'][:500]}")
+            logger.error(f"Docker build failed: {
+                         build_result['output'][:500]}")
             return None
 
         # Get install command for this project type
-        install_cmd = self._get_install_command(commands.project_type, repo_path)
+        install_cmd = self._get_install_command(
+            commands.project_type, repo_path)
 
         # Convert npm commands to the correct package manager (yarn/pnpm)
-        lint_command = self._convert_npm_command(commands.lint_command, repo_path) if commands.lint_command else None
-        test_command = self._convert_npm_command(commands.test_command, repo_path) if commands.test_command else None
+        lint_command = self._convert_npm_command(
+            commands.lint_command, repo_path) if commands.lint_command else None
+        test_command = self._convert_npm_command(
+            commands.test_command, repo_path) if commands.test_command else None
 
         try:
             # Run lint if available (with dependencies install)
             if lint_command:
                 if install_cmd:
-                    # Chain install + lint in single container
                     full_cmd = f"sh -c '{install_cmd} && {lint_command}'"
-                    logger.info(f"Running in docker: {install_cmd} && {lint_command}")
+                    logger.info(f"Running in docker: {
+                                install_cmd} && {lint_command}")
                 else:
                     full_cmd = lint_command
                     logger.info(f"Running linter in docker: {lint_command}")
-                
+
                 lint_cmd = f"docker run --rm {image_name} {full_cmd}"
-                lint_result = self._run_command(lint_cmd, repo_path, timeout=300)
+                lint_result = self._run_command(
+                    lint_cmd, repo_path, timeout=300)
                 result.lint_command = lint_cmd
                 result.lint_output = lint_result.get("output", "")
-
-                logger.info(f"Lint result: exit={lint_result['returncode']}, output_len={len(result.lint_output)}")
-                if lint_result["returncode"] != 0:
-                    result.success = False
-                    result.lint_errors = self._parse_lint_errors(
-                        result.lint_output, commands.project_type)
-                    logger.info(f"Parsed {len(result.lint_errors)} lint errors")
-                    if not result.lint_errors:
-                        result.lint_errors = [LintError(
-                            file_path="unknown", line=0, column=0,
-                            message=f"Linter failed in Docker. Output: {result.lint_output[:500]}",
-                            rule="docker-lint-failure",
-                        )]
-                else:
-                    logger.info("Lint passed")
+                self._process_lint_result(
+                    lint_result, commands.project_type, result, " in Docker")
 
             # Run tests if available (with dependencies install)
             if test_command:
                 if install_cmd:
-                    # Chain install + test in single container
                     full_cmd = f"sh -c '{install_cmd} && {test_command}'"
-                    logger.info(f"Running in docker: {install_cmd} && {test_command}")
+                    logger.info(f"Running in docker: {
+                                install_cmd} && {test_command}")
                 else:
                     full_cmd = test_command
                     logger.info(f"Running tests in docker: {test_command}")
-                
+
                 test_cmd = f"docker run --rm {image_name} {full_cmd}"
-                test_result = self._run_command(test_cmd, repo_path, timeout=600)
+                test_result = self._run_command(
+                    test_cmd, repo_path, timeout=600)
                 result.test_command = test_cmd
                 result.test_output = test_result.get("output", "")
-
-                logger.info(f"Test result: exit={test_result['returncode']}, output_len={len(result.test_output)}")
-                if test_result["returncode"] != 0:
-                    result.success = False
-                    result.test_errors = self._parse_test_errors(
-                        result.test_output, commands.project_type)
-                    logger.info(f"Parsed {len(result.test_errors)} test errors")
-                    if not result.test_errors:
-                        result.test_errors = [TestError(
-                            test_name="unknown", file_path=None,
-                            message="Tests failed in Docker",
-                            traceback=result.test_output[-1500:],
-                        )]
+                self._process_test_result(
+                    test_result, commands.project_type, result, " in Docker")
 
         finally:
             # Cleanup - remove the image
-            self._run_command(f"docker rmi {image_name}", repo_path, timeout=60)
+            self._run_command(
+                f"docker rmi {image_name}", repo_path, timeout=60)
 
         logger.info(f"Dockerfile validation complete: success={result.success}, "
                     f"lint_errors={len(result.lint_errors)}, test_errors={len(result.test_errors)}")
@@ -697,7 +696,7 @@ class Validator:
         if project_type in ("javascript", "typescript"):
             pm = self._detect_js_package_manager(repo_path)
             return f"{pm} install"
-        elif project_type == "python":
+        if project_type == "python":
             if (repo_path / "pyproject.toml").exists():
                 return "pip install -e ."
             if (repo_path / "requirements.txt").exists():
@@ -705,9 +704,9 @@ class Validator:
             if (repo_path / "setup.py").exists():
                 return "pip install -e ."
             return "pip install -r requirements.txt"
-        elif project_type == "go":
+        if project_type == "go":
             return "go mod download"
-        elif project_type == "rust":
+        if project_type == "rust":
             return "cargo fetch"
 
         return None
@@ -716,20 +715,20 @@ class Validator:
         """Convert npm command to the appropriate package manager."""
         if not command:
             return command
-        
+
         pm = self._detect_js_package_manager(repo_path)
         if pm == "npm":
             return command
-        
+
         # Convert npm commands to yarn/pnpm equivalents
         if command.startswith("npm run "):
             script = command[8:]  # Remove "npm run "
             return f"{pm} run {script}"
-        elif command.startswith("npm test"):
-            return f"{pm} test" if pm == "yarn" else f"{pm} test"
-        elif command == "npm install":
+        if command.startswith("npm test"):
+            return f"{pm} test"
+        if command == "npm install":
             return f"{pm} install"
-        
+
         return command
 
     def _is_valid_file_path(self, file_path: Optional[str]) -> bool:
@@ -786,7 +785,8 @@ class Validator:
 
             # Log with command name for clarity
             cmd_short = command[:60] + "..." if len(command) > 60 else command
-            logger.info(f"[{cmd_short}] completed in {elapsed:.1f}s, exit={result.returncode}")
+            logger.info(f"[{cmd_short}] completed in {
+                        elapsed:.1f}s, exit={result.returncode}")
             if result.returncode != 0:
                 logger.debug(f"Command output (first 500 chars): {
                              output[:500]}")

@@ -1,4 +1,4 @@
-"""Reviewing Agent — review PRs against Issue, diff, CI, and Chroma context."""
+"""Reviewing Agent — review PRs against Issue, diff, and CI."""
 from .config import ReviewAgentConfig, load_config
 from .models import ReviewInput, ReviewResult, ReviewError
 from .main import review_pr

@@ -4,7 +4,7 @@ setup:
 	git config core.hooksPath .githooks
 
 lint:
-	pylint coding-agent indexer-service webhook-service reviewer-agent
+	pylint coding-agent webhook-service reviewer-agent
 
 test:
 	pytest
