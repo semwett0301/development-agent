@@ -2,6 +2,12 @@
 
 Мульти-агентная система с микросервисной архитектурой для автоматизации процессов разработки программного обеспечения на GitHub.
 
+## 🔗 Ссылки
+
+- **Тестовый проект**: [RcruitFlow](https://github.com/semwett0301/rcruit-flow) - проект на котором тестировалась система
+- **Тестовый стенд**: [rcruit-flow.onrender.com](https://rcruit-flow.onrender.com/) - демо-версия тестового проекта
+- **GitHub App**: [megaschool-agent-simon-mokrov](https://github.com/apps/megaschool-agent-simon-mokrov) - итоговое приложение GitHub App
+
 ## Scope проекта
 
 Development Agent — это система автоматизации разработки, которая:
@@ -193,12 +199,183 @@ DOCKERHUB_USERNAME=your_dockerhub_username
   - `review-events`: События для запуска Reviewer Agent
 - **Режим**: KRaft (без Zookeeper)
 
-### Поток данных
+### Поток данных и сообщений
 
-1. **Создание Issue** → GitHub отправляет webhook → Webhook Service → Kafka (`coding-events`) → Coding Agent
-2. **Coding Agent** → Генерирует код → Создает PR → GitHub
-3. **CI/CD завершается** → GitHub отправляет webhook → Webhook Service → Kafka (`review-events`) → Reviewer Agent
-4. **Reviewer Agent** → Анализирует PR → Создает комментарии → GitHub
+#### Схема потока сообщений через Kafka
+
+Система использует асинхронную коммуникацию через Kafka для координации работы агентов. Ниже представлена детальная схема потока сообщений:
+
+```
+GitHub Webhooks
+      │
+      ├─ issues.opened
+      │     │
+      │     ▼
+      │  Webhook Service
+      │     │
+      │     │ Создает CodingEvent(type="START", repository, issue_number)
+      │     │
+      │     ▼
+      │  Kafka Topic: coding-events
+      │     │
+      │     ▼
+      │  Coding Agent (Consumer)
+      │     │
+      │     ├─ Анализирует issue
+      │     ├─ Генерирует код
+      │     ├─ Создает коммит
+      │     └─ Создает Pull Request
+      │           │
+      │           ▼
+      │        GitHub Repository
+      │
+      ├─ pull_request_review_comment
+      │     │
+      │     ▼
+      │  Webhook Service
+      │     │
+      │     │ Создает CodingEvent(type="REDO", repository, issue_number, pull_request_number)
+      │     │
+      │     ▼
+      │  Kafka Topic: coding-events
+      │     │
+      │     ▼
+      │  Coding Agent (Consumer)
+      │     │
+      │     └─ Перезапускает генерацию кода для существующего PR
+      │
+      ├─ pull_request_review (state="changes_requested")
+      │     │
+      │     ▼
+      │  Webhook Service
+      │     │
+      │     │ Создает CodingEvent(type="REDO", repository, issue_number, pull_request_number)
+      │     │
+      │     ▼
+      │  Kafka Topic: coding-events
+      │     │
+      │     ▼
+      │  Coding Agent (Consumer)
+      │     │
+      │     └─ Исправляет код согласно замечаниям ревьюера
+      │
+      ├─ REDO (custom webhook)
+      │     │
+      │     ▼
+      │  Webhook Service
+      │     │
+      │     │ Создает CodingEvent(type="REDO", repository, issue_number, pull_request_number)
+      │     │
+      │     ▼
+      │  Kafka Topic: coding-events
+      │     │
+      │     ▼
+      │  Coding Agent (Consumer)
+      │
+      └─ check_suite.completed
+            │
+            ▼
+         Webhook Service
+            │
+            │ Создает ReviewEvent(repository, pull_request_number)
+            │
+            ▼
+         Kafka Topic: review-events
+            │
+            ▼
+         Reviewer Agent (Consumer)
+            │
+            ├─ Получает PR и связанный issue
+            ├─ Анализирует diff изменений
+            ├─ Проверяет соответствие требованиям issue
+            ├─ Проверяет статус CI/CD пайплайнов
+            ├─ Ищет ошибки и проблемы в коде
+            └─ Создает комментарии в PR
+```
+
+#### Типы событий Kafka
+
+##### 1. CodingEvent (Топик: `coding-events`)
+
+События для запуска или перезапуска Coding Agent.
+
+**Типы событий:**
+- `START` - Начало обработки нового issue
+- `REDO` - Перезапуск обработки существующего issue/PR
+
+**Структура сообщения:**
+```json
+{
+  "type": "START" | "REDO",
+  "repository": "owner/repo-name",
+  "issue_number": 123,
+  "pull_request_number": 456  // Опционально, только для REDO
+}
+```
+
+**Источники событий:**
+- `issues.opened` → `START` - При создании нового issue
+- `pull_request_review_comment` → `REDO` - При комментарии в PR review
+- `pull_request_review` (state="changes_requested") → `REDO` - При запросе изменений в review
+- `REDO` (custom webhook) → `REDO` - Ручной перезапуск через кастомный webhook
+
+**Consumer:** Coding Agent (group_id: `coding-agent`)
+
+##### 2. ReviewEvent (Топик: `review-events`)
+
+События для запуска Reviewer Agent после завершения CI/CD.
+
+**Структура сообщения:**
+```json
+{
+  "repository": "owner/repo-name",
+  "pull_request_number": 456
+}
+```
+
+**Источники событий:**
+- `check_suite.completed` - После завершения CI/CD пайплайнов
+
+**Consumer:** Reviewer Agent (group_id: `reviewer-agent`)
+
+#### Детальный поток обработки
+
+**Сценарий 1: Обработка нового Issue**
+
+1. Пользователь создает Issue в GitHub
+2. GitHub отправляет webhook `issues.opened` на `/github/webhook/`
+3. Webhook Service:
+   - Верифицирует подпись webhook'а
+   - Извлекает `repository` и `issue_number` из payload
+   - Создает `CodingEvent(type="START", repository, issue_number)`
+   - Отправляет событие в топик `coding-events` Kafka
+4. Coding Agent (consumer):
+   - Получает событие из топика `coding-events`
+   - Получает issue через GitHub API
+   - Анализирует issue и создает план действий
+   - Генерирует код
+   - Создает коммит и Push Request
+5. GitHub запускает CI/CD пайплайны для нового PR
+6. После завершения CI/CD GitHub отправляет webhook `check_suite.completed`
+7. Webhook Service создает `ReviewEvent` и отправляет в топик `review-events`
+8. Reviewer Agent анализирует PR и создает комментарии
+
+**Сценарий 2: Перезапуск обработки (REDO)**
+
+1. Пользователь оставляет комментарий в PR review или запрашивает изменения
+2. GitHub отправляет webhook `pull_request_review_comment` или `pull_request_review`
+3. Webhook Service:
+   - Извлекает информацию о PR и связанном issue
+   - Создает `CodingEvent(type="REDO", repository, issue_number, pull_request_number)`
+   - Отправляет в топик `coding-events`
+4. Coding Agent:
+   - Получает существующий PR
+   - Анализирует комментарии и замечания
+   - Генерирует исправления
+   - Обновляет PR новым коммитом
+5. Цикл повторяется с шага 5 основного сценария
+
+
 
 ## Deployment
 
@@ -257,7 +434,7 @@ docker compose up -d
 
 ## Langfuse Integration
 
-Проект интегрирован с Langfuse для мониторинга и observability LLM вызовов.
+Проект интегрирован с Langfuse для мониторинга и observability LLM вызовов. Система отслеживает все взаимодействия с LLM моделями, предоставляя детальную аналитику по использованию, стоимости и производительности.
 
 ### Возможности
 
@@ -278,11 +455,13 @@ docker compose up -d
    LANGFUSE_BASE_URL=https://cloud.langfuse.com
    ```
 
-### Скриншот Langfuse Dashboard
+### Langfuse Dashboard
 
-![Langfuse Dashboard](docs/langfuse-dashboard.png)
+Ниже представлен дашборд Langfuse для организации **rcruit-flow**, демонстрирующий метрики работы системы:
 
-*Пример дашборда Langfuse с метриками выполнения агентов*
+![Langfuse Dashboard - rcruit-flow](docs/langfuse-dashboard.png)
+
+*Дашборд Langfuse для проекта rcruit-flow: общее количество traces (87), стоимость использования модели Claude Opus ($10.01), графики использования и стоимости по времени*
 
 ## Демонстрация
 
@@ -303,12 +482,24 @@ docker compose up -d
 - ✅ Генерирует код с учетом контекста проекта
 - ✅ Создает Pull Request с изменениями
 
+**Пример созданного Pull Request:**
+
+![Открытый Pull Request](docs/open-pr.png)
+
+*Пример автоматически созданного PR ботом `megaschool-agent-simon-mokrov` для issue #69. PR содержит детальное описание изменений, список выполненных задач и измененные файлы.*
+
 #### 3. Code Review
 
 - ✅ После завершения CI/CD запускается Reviewer Agent
 - ✅ Проверяется соответствие требованиям issue
 - ✅ Анализируется качество кода
 - ✅ Создаются комментарии в PR при обнаружении проблем
+
+**Пример автоматического code review:**
+
+![Полученное ревью](docs/review-comment.png)
+
+*Пример комментария Reviewer Agent в PR. Агент анализирует код, проверяет статус CI/CD и выявляет проблемы: неполные файлы, отсутствующие компоненты, ошибки импорта. При обнаружении проблем агент запрашивает изменения и может перезапустить процесс генерации кода.*
 
 ### Основные возможности в действии
 
@@ -322,35 +513,28 @@ docker compose up -d
 
 ### Текущие ограничения
 
-1. **Языки программирования**:
-   - Система лучше всего работает с Python проектами
-   - Поддержка других языков ограничена
+1. **Отсутствие поддержки линтеров и тестов**: Coding Agent не интегрирован с линтерами и тестовыми утилитами проекта. Генерируемый код не проходит автоматическую проверку на соответствие стандартам кодирования и не запускает тесты перед созданием PR.
 
-2. **Размер репозитория**:
-   - Большие репозитории (>100MB) могут вызывать проблемы с производительностью
-   - Ограничения токенов LLM могут не позволить обработать весь контекст
+2. **Отсутствие векторной индексации**: Система не использует векторную базу данных для индексации кода. Поиск релевантного контекста осуществляется через простой текстовый поиск, что может быть менее эффективно для больших репозиториев.
 
-3. **Сложность задач**:
-   - Система лучше справляется с четко определенными задачами
-   - Многошаговые задачи могут требовать нескольких итераций
+3. **Требование публичного репозитория**: Система работает только с публичными GitHub репозиториями. Приватные репозитории не поддерживаются.
 
-4. **CI/CD интеграция**:
-   - Reviewer Agent зависит от завершения CI/CD пайплайнов
-   - Может не работать корректно с кастомными CI системами
+4. **Зависимость от CI/CD пайплайнов**: Reviewer Agent работает только если в репозитории настроены CI/CD пайплайны (GitHub Actions). Без пайплайнов автоматический code review не запускается.
 
-5. **Безопасность**:
-   - Docker-in-Docker требует доступа к Docker socket
-   - Необходимо тщательно контролировать права доступа
+### Дополнительные ограничения
+
+- **Размер репозитория**: Большие репозитории (>100MB) могут вызывать проблемы с производительностью. Ограничения токенов LLM могут не позволить обработать весь контекст.
+
+- **Сложность задач**: Система лучше справляется с четко определенными задачами. Многошаговые задачи могут требовать нескольких итераций.
+
 
 ### Планы на будущее
 
-- [ ] Поддержка большего количества языков программирования
-- [ ] Оптимизация работы с большими репозиториями
-- [ ] Улучшение обработки сложных многошаговых задач
-- [ ] Расширенная интеграция с различными CI/CD системами
-- [ ] Улучшение безопасности и изоляции выполнения кода
-- [ ] Добавление поддержки параллельной обработки нескольких issues
-- [ ] Улучшение обработки ошибок и retry логики
+- [ ] Интеграция с линтерами и тестовыми фреймворками проекта
+- [ ] Добавление векторной базы данных для улучшенного поиска по контексту
+- [ ] Поддержка приватных репозиториев
+- [ ] Работа без обязательного наличия CI/CD пайплайнов
+
 
 ## Getting Started
 
@@ -381,7 +565,3 @@ docker compose up -d
 - `refactor`: Изменение кода без исправления бага или добавления функции
 
 **Scopes**: `coding`, `reviewer`, `webhook`
-
-## License
-
-[Укажите лицензию проекта]
