@@ -308,47 +308,54 @@ class Validator:
         # Run lint if available
         if commands.lint_command:
             logger.info(f"Running linter in docker: {commands.lint_command}")
-            lint_cmd = f"docker compose run --rm {
-                service} {commands.lint_command}"
+            lint_cmd = f"docker compose run --rm {service} {commands.lint_command}"
             lint_result = self._run_command(lint_cmd, repo_path, timeout=300)
             result.lint_command = lint_cmd
             result.lint_output = lint_result.get("output", "")
 
+            logger.info(f"Lint result: exit={lint_result['returncode']}, output_len={len(result.lint_output)}")
             if lint_result["returncode"] != 0:
                 result.success = False
                 result.lint_errors = self._parse_lint_errors(
                     result.lint_output, commands.project_type)
+                logger.info(f"Parsed {len(result.lint_errors)} lint errors")
                 if not result.lint_errors:
                     result.lint_errors = [LintError(
                         file_path="unknown", line=0, column=0,
-                        message=f"Linter failed in Docker. Output: {
-                            result.lint_output[:500]}",
+                        message=f"Linter failed in Docker. Output: {result.lint_output[:500]}",
                         rule="docker-lint-failure",
                     )]
+            else:
+                logger.info("Lint passed")
 
         # Run tests if available
         if commands.test_command:
             logger.info(f"Running tests in docker: {commands.test_command}")
-            test_cmd = f"docker compose run --rm {
-                service} {commands.test_command}"
+            test_cmd = f"docker compose run --rm {service} {commands.test_command}"
             test_result = self._run_command(test_cmd, repo_path, timeout=600)
             result.test_command = test_cmd
             result.test_output = test_result.get("output", "")
 
+            logger.info(f"Test result: exit={test_result['returncode']}, output_len={len(result.test_output)}")
             if test_result["returncode"] != 0:
                 result.success = False
                 result.test_errors = self._parse_test_errors(
                     result.test_output, commands.project_type)
+                logger.info(f"Parsed {len(result.test_errors)} test errors")
                 if not result.test_errors:
                     result.test_errors = [TestError(
                         test_name="unknown", file_path=None,
                         message="Tests failed in Docker",
                         traceback=result.test_output[-1500:],
                     )]
+            else:
+                logger.info("Tests passed")
 
         # Cleanup
         self._run_command("docker compose down", repo_path, timeout=60)
 
+        logger.info(f"Docker compose validation complete: success={result.success}, "
+                    f"lint_errors={len(result.lint_errors)}, test_errors={len(result.test_errors)}")
         return result
 
     def _validate_with_dockerfile(self, repo_path: Path, commands: ProjectCommands, result: ValidationResult) -> Optional[ValidationResult]:
@@ -372,42 +379,41 @@ class Validator:
         try:
             # Run lint if available
             if commands.lint_command:
-                logger.info(f"Running linter in docker: {
-                            commands.lint_command}")
-                lint_cmd = f"docker run --rm {
-                    image_name} {commands.lint_command}"
-                lint_result = self._run_command(
-                    lint_cmd, repo_path, timeout=300)
+                logger.info(f"Running linter in docker: {commands.lint_command}")
+                lint_cmd = f"docker run --rm {image_name} {commands.lint_command}"
+                lint_result = self._run_command(lint_cmd, repo_path, timeout=300)
                 result.lint_command = lint_cmd
                 result.lint_output = lint_result.get("output", "")
 
+                logger.info(f"Lint result: exit={lint_result['returncode']}, output_len={len(result.lint_output)}")
                 if lint_result["returncode"] != 0:
                     result.success = False
                     result.lint_errors = self._parse_lint_errors(
                         result.lint_output, commands.project_type)
+                    logger.info(f"Parsed {len(result.lint_errors)} lint errors")
                     if not result.lint_errors:
                         result.lint_errors = [LintError(
                             file_path="unknown", line=0, column=0,
-                            message=f"Linter failed in Docker. Output: {
-                                result.lint_output[:500]}",
+                            message=f"Linter failed in Docker. Output: {result.lint_output[:500]}",
                             rule="docker-lint-failure",
                         )]
+                else:
+                    logger.info("Lint passed")
 
             # Run tests if available
             if commands.test_command:
-                logger.info(f"Running tests in docker: {
-                            commands.test_command}")
-                test_cmd = f"docker run --rm {
-                    image_name} {commands.test_command}"
-                test_result = self._run_command(
-                    test_cmd, repo_path, timeout=600)
+                logger.info(f"Running tests in docker: {commands.test_command}")
+                test_cmd = f"docker run --rm {image_name} {commands.test_command}"
+                test_result = self._run_command(test_cmd, repo_path, timeout=600)
                 result.test_command = test_cmd
                 result.test_output = test_result.get("output", "")
 
+                logger.info(f"Test result: exit={test_result['returncode']}, output_len={len(result.test_output)}")
                 if test_result["returncode"] != 0:
                     result.success = False
                     result.test_errors = self._parse_test_errors(
                         result.test_output, commands.project_type)
+                    logger.info(f"Parsed {len(result.test_errors)} test errors")
                     if not result.test_errors:
                         result.test_errors = [TestError(
                             test_name="unknown", file_path=None,
@@ -417,9 +423,10 @@ class Validator:
 
         finally:
             # Cleanup - remove the image
-            self._run_command(
-                f"docker rmi {image_name}", repo_path, timeout=60)
+            self._run_command(f"docker rmi {image_name}", repo_path, timeout=60)
 
+        logger.info(f"Dockerfile validation complete: success={result.success}, "
+                    f"lint_errors={len(result.lint_errors)}, test_errors={len(result.test_errors)}")
         return result
 
     def _is_valid_file_path(self, file_path: Optional[str]) -> bool:
@@ -474,8 +481,9 @@ class Validator:
             if result.stderr:
                 output += "\n" + result.stderr
 
-            logger.info(f"Command completed in {
-                        elapsed:.1f}s with exit code {result.returncode}")
+            # Log with command name for clarity
+            cmd_short = command[:60] + "..." if len(command) > 60 else command
+            logger.info(f"[{cmd_short}] completed in {elapsed:.1f}s, exit={result.returncode}")
             if result.returncode != 0:
                 logger.debug(f"Command output (first 500 chars): {
                              output[:500]}")
