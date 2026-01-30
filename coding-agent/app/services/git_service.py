@@ -80,7 +80,8 @@ class GitService:
         )
         self._current_branch_name = head_ref
         logger.info(
-            f"Repository setup for PR #{pr_number} at {repo_path}, branch: {head_ref}"
+            f"Repository setup for PR #{pr_number} at {
+                repo_path}, branch: {head_ref}"
         )
         return repo_path
 

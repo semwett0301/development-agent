@@ -77,7 +77,8 @@ class CodingAgent:
 
         try:
             logger.info("Step 1: Setting up repository (PR branch)...")
-            repo_path = self.git_service.setup_repository_for_pr(repo, pr_number)
+            repo_path = self.git_service.setup_repository_for_pr(
+                repo, pr_number)
 
             logger.info("Step 2: Summarizing issue...")
             summary = self.issue_processor.summarize_issue(issue)
@@ -90,10 +91,12 @@ class CodingAgent:
                 repo_name=repo_name,
             )
             code_context = self.code_search.build_context(search_results)
-            project_structure = self.code_search.get_project_structure(repo_path)
+            project_structure = self.code_search.get_project_structure(
+                repo_path)
 
             logger.info("Step 4: Creating action plan...")
-            project_language = self.code_generator.get_project_language(repo_path)
+            project_language = self.code_generator.get_project_language(
+                repo_path)
             plan = self.issue_processor.create_action_plan(
                 summary=summary,
                 code_context=code_context,
@@ -114,7 +117,8 @@ class CodingAgent:
             logger.info("Step 6: Committing changes...")
             commit_message = self.issue_processor.create_commit_message(
                 summary=summary,
-                changes_description=f"REDO: changed {len(files_changed)} files",
+                changes_description=f"REDO: changed {
+                    len(files_changed)} files",
                 issue_number=issue_number,
             )
             self.git_service.commit_all_changes(
@@ -128,8 +132,10 @@ class CodingAgent:
             result.pull_request = PullRequest(
                 number=pr_number,
                 title="",
-                url=f"{self.github_client.base_url}/repos/{owner}/{repo_name}/pulls/{pr_number}",
-                html_url=f"https://github.com/{owner}/{repo_name}/pull/{pr_number}",
+                url=f"{
+                    self.github_client.base_url}/repos/{owner}/{repo_name}/pulls/{pr_number}",
+                html_url=f"https://github.com/{owner}/{
+                    repo_name}/pull/{pr_number}",
                 state="open",
             )
             result.success = True
@@ -294,7 +300,8 @@ def run_agent(
         config: Optional agent configuration
     """
     get_client().update_current_trace(
-        session_id=f"{repo}#{issue_number}" + (f"#pr{pull_request_number}" if pull_request_number else "")
+        session_id=f"{repo}#{issue_number}" +
+        (f"#pr{pull_request_number}" if pull_request_number else "")
     )
 
     agent = CodingAgent(config)

@@ -65,9 +65,10 @@ async def run_agent_async(
 ):
     """Run the coding agent asynchronously (START or REDO)."""
     mode = "REDO" if pull_request_number is not None else "START"
+    pr_suffix = f", PR #{pull_request_number})" if pull_request_number else ")"
     logger.info(
-        f"Starting agent for {repo} issue #{issue_number} ({mode}"
-        + (f", PR #{pull_request_number})" if pull_request_number else ")")
+        "Starting agent for %s issue #%s (%s%s",
+        repo, issue_number, mode, pr_suffix,
     )
     try:
         loop = asyncio.get_event_loop()
