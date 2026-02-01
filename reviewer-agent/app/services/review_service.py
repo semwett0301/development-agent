@@ -312,27 +312,10 @@ class ReviewService:
             asyncio.run(_approve())
         elif params.review_count >= self.MAX_REVIEW_ATTEMPTS and not params.ci_passed:
             logger.warning(
-                "[review] PR #%s failed after %s attempts → giving up, requesting changes",
+                "[review] PR #%s failed after %s attempts → skipping",
                 params.pr_number,
                 params.review_count,
             )
-            updated_body = add_review_failed_message(
-                updated_body, self.MAX_REVIEW_ATTEMPTS)
-
-            async def _request_changes():
-                await self._github.update_pull_request(
-                    params.owner, params.repo, params.pr_number, updated_body)
-                await self._github.request_changes(
-                    params.owner,
-                    params.repo,
-                    params.pr_number,
-                    f"❌ После {
-                        self.MAX_REVIEW_ATTEMPTS} попыток ревью пайплайны всё ещё падают.\n\n"
-                    f"Требуется ручное вмешательство.\n\n"
-                    f"**Ошибки CI:**\n{params.ci_status}",
-                    commit_id=params.head_sha,
-                )
-            asyncio.run(_request_changes())
         else:
             logger.info(
                 "[review] PR #%s needs fixes → posting review with errors (attempt %s/%s)",

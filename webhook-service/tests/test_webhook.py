@@ -52,63 +52,6 @@ async def test_issue_created_sends_to_coding_events(client, mock_send):
     assert value["issue_number"] == 42
 
 
-async def test_redo_event_sends_redo(client, mock_send):
-    """Incoming webhook with x-github-event: REDO sends CodingEvent type REDO."""
-    payload = json.dumps({
-        "repository": {"full_name": "owner/repo"},
-        "issue_number": 42,
-        "pull_request_number": 100,
-    }).encode()
-
-    response = await client.post(
-        "/github/webhook/", content=payload,
-        headers=_headers("REDO", payload))
-
-    assert response.status_code == 200
-    mock_send.assert_called_once()
-    call_kwargs = mock_send.call_args.kwargs
-    assert call_kwargs["topic"] == "coding-events"
-    assert call_kwargs["key"] == "REDO"
-
-    value = json.loads(call_kwargs["value"])
-    assert value["type"] == "REDO"
-    assert value["repository"] == "owner/repo"
-    assert value["issue_number"] == 42
-    assert value["pull_request_number"] == 100
-
-
-async def test_redo_event_with_issue_object(client, mock_send):
-    """REDO event can use payload.issue.number instead of issue_number."""
-    payload = json.dumps({
-        "repository": {"full_name": "owner/repo"},
-        "issue": {"number": 99},
-        "pull_request": {"number": 101},
-    }).encode()
-
-    response = await client.post(
-        "/github/webhook/", content=payload,
-        headers=_headers("REDO", payload))
-
-    assert response.status_code == 200
-    value = json.loads(mock_send.call_args.kwargs["value"])
-    assert value["type"] == "REDO"
-    assert value["issue_number"] == 99
-    assert value["pull_request_number"] == 101
-
-
-async def test_redo_event_missing_issue_returns_400(client, mock_send):
-    payload = json.dumps({
-        "repository": {"full_name": "owner/repo"},
-    }).encode()
-
-    response = await client.post(
-        "/github/webhook/", content=payload,
-        headers=_headers("REDO", payload))
-
-    assert response.status_code == 400
-    mock_send.assert_not_called()
-
-
 async def test_pr_review_comment_sends_redo(client, mock_send):
     payload = json.dumps({
         "action": "submitted",

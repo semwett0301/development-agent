@@ -156,6 +156,10 @@ class GitHubClient:
 
     def push_branch(self, repo_path: Path, branch_name: str) -> None:
         """Push a branch to origin."""
+        import asyncio
+
+        asyncio.run(self._token_manager.refresh_remote_token(repo_path))
+
         r = git.Repo(repo_path)
         r.git.push("origin", branch_name)
         logger.info(f"Pushed branch: {branch_name}")

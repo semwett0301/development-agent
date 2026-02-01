@@ -156,9 +156,9 @@ DOCKERHUB_USERNAME=your_dockerhub_username
 - **Порт**: `80` (production), `8005` (development)
 - **Назначение**: Принимает webhook'и от GitHub и преобразует их в события Kafka
 - **Обрабатываемые события**:
-  - `issues.opened` → запускает Coding Agent
-  - `pull_request_review_comment` → перезапускает Coding Agent (REDO)
-  - `check_suite.completed` → запускает Reviewer Agent
+  - `issues.opened` → создает `CodingEvent(type="START")` → запускает Coding Agent
+  - `pull_request_review` (state="changes_requested") → создает `CodingEvent(type="REDO")` → перезапускает Coding Agent
+  - `check_suite.completed` → создает `ReviewEvent` → запускает Reviewer Agent
 - **Безопасность**: Верификация подписи webhook'ов через `GITHUB_WEBHOOK_SECRET`
 
 #### 2. Coding Agent (`coding-agent`)
@@ -213,84 +213,83 @@ GitHub Webhooks
       │     ▼
       │  Webhook Service
       │     │
+      │     │ Верификация подписи webhook'а
+      │     │ Извлечение repository и issue_number
       │     │ Создает CodingEvent(type="START", repository, issue_number)
       │     │
       │     ▼
       │  Kafka Topic: coding-events
       │     │
       │     ▼
-      │  Coding Agent (Consumer)
+      │  Coding Agent (Consumer, group_id: "coding-agent")
       │     │
-      │     ├─ Анализирует issue
-      │     ├─ Генерирует код
-      │     ├─ Создает коммит
+      │     ├─ Получает issue через GitHub API
+      │     ├─ Анализирует issue и создает план действий
+      │     ├─ Ищет релевантный код в репозитории
+      │     ├─ Генерирует код по шагам плана
+      │     ├─ Создает коммит с изменениями
       │     └─ Создает Pull Request
       │           │
       │           ▼
       │        GitHub Repository
+      │           │
+      │           ├─ Запускает CI/CD пайплайны
+      │           │
+      │           └─ После завершения → check_suite.completed
       │
-      ├─ pull_request_review_comment
+      ├─ pull_request_review (action="submitted", state="changes_requested")
       │     │
       │     ▼
       │  Webhook Service
       │     │
+      │     │ Верификация подписи webhook'а
+      │     │ Извлечение PR и связанного issue из PR body (Closes #N)
       │     │ Создает CodingEvent(type="REDO", repository, issue_number, pull_request_number)
       │     │
       │     ▼
       │  Kafka Topic: coding-events
       │     │
       │     ▼
-      │  Coding Agent (Consumer)
+      │  Coding Agent (Consumer, group_id: "coding-agent")
       │     │
-      │     └─ Перезапускает генерацию кода для существующего PR
+      │     ├─ Получает существующий PR
+      │     ├─ Анализирует комментарии ревьюера
+      │     ├─ Генерирует исправления кода
+      │     ├─ Создает новый коммит
+      │     └─ Обновляет существующий PR
+      │           │
+      │           ▼
+      │        GitHub Repository
+      │           │
+      │           └─ Запускает CI/CD пайплайны → check_suite.completed
       │
-      ├─ pull_request_review (state="changes_requested")
-      │     │
-      │     ▼
-      │  Webhook Service
-      │     │
-      │     │ Создает CodingEvent(type="REDO", repository, issue_number, pull_request_number)
-      │     │
-      │     ▼
-      │  Kafka Topic: coding-events
-      │     │
-      │     ▼
-      │  Coding Agent (Consumer)
-      │     │
-      │     └─ Исправляет код согласно замечаниям ревьюера
-      │
-      ├─ REDO (custom webhook)
-      │     │
-      │     ▼
-      │  Webhook Service
-      │     │
-      │     │ Создает CodingEvent(type="REDO", repository, issue_number, pull_request_number)
-      │     │
-      │     ▼
-      │  Kafka Topic: coding-events
-      │     │
-      │     ▼
-      │  Coding Agent (Consumer)
-      │
-      └─ check_suite.completed
+      └─ check_suite.completed (action="completed")
             │
             ▼
          Webhook Service
             │
-            │ Создает ReviewEvent(repository, pull_request_number)
+            │ Верификация подписи webhook'а
+            │ Извлечение всех PR, связанных с check_suite
+            │ Для каждого PR создает ReviewEvent(repository, pull_request_number)
             │
             ▼
          Kafka Topic: review-events
             │
             ▼
-         Reviewer Agent (Consumer)
+         Reviewer Agent (Consumer, group_id: "reviewer-agent")
             │
-            ├─ Получает PR и связанный issue
-            ├─ Анализирует diff изменений
-            ├─ Проверяет соответствие требованиям issue
-            ├─ Проверяет статус CI/CD пайплайнов
-            ├─ Ищет ошибки и проблемы в коде
-            └─ Создает комментарии в PR
+            ├─ Получает PR через GitHub API
+            ├─ Извлекает номер issue из PR body (Closes #N)
+            ├─ Получает issue через GitHub API
+            ├─ Анализирует diff изменений в PR
+            ├─ Проверяет статус CI/CD пайплайнов (check_runs)
+            ├─ Сравнивает summary issue и PR (через embedding)
+            ├─ Ищет ошибки и проблемы в коде через LLM
+            ├─ Формирует результат ревью
+            └─ Создает комментарий в PR (при обнаружении проблем)
+                  │
+                  ▼
+               GitHub Repository
 ```
 
 #### Типы событий Kafka
@@ -314,10 +313,8 @@ GitHub Webhooks
 ```
 
 **Источники событий:**
-- `issues.opened` → `START` - При создании нового issue
-- `pull_request_review_comment` → `REDO` - При комментарии в PR review
-- `pull_request_review` (state="changes_requested") → `REDO` - При запросе изменений в review
-- `REDO` (custom webhook) → `REDO` - Ручной перезапуск через кастомный webhook
+- `issues.opened` → `START` - При создании нового issue. Webhook Service извлекает `repository` и `issue_number` из payload и создает событие `START`.
+- `pull_request_review` (action="submitted", state="changes_requested") → `REDO` - При запросе изменений в review. Webhook Service извлекает номер issue из PR body (ищет паттерн "Closes #N" или "Fixes #N") и создает событие `REDO` с `pull_request_number`.
 
 **Consumer:** Coding Agent (group_id: `coding-agent`)
 
@@ -362,18 +359,23 @@ GitHub Webhooks
 
 **Сценарий 2: Перезапуск обработки (REDO)**
 
-1. Пользователь оставляет комментарий в PR review или запрашивает изменения
-2. GitHub отправляет webhook `pull_request_review_comment` или `pull_request_review`
+1. Ревьюер запрашивает изменения в PR (оставляет review с state="changes_requested")
+2. GitHub отправляет webhook `pull_request_review` с action="submitted" и state="changes_requested"
 3. Webhook Service:
-   - Извлекает информацию о PR и связанном issue
+   - Верифицирует подпись webhook'а
+   - Извлекает `repository` и `pull_request_number` из payload
+   - Извлекает номер issue из PR body (ищет паттерн "Closes #N", "Fixes #N" или использует номер PR как fallback)
    - Создает `CodingEvent(type="REDO", repository, issue_number, pull_request_number)`
-   - Отправляет в топик `coding-events`
-4. Coding Agent:
-   - Получает существующий PR
-   - Анализирует комментарии и замечания
-   - Генерирует исправления
-   - Обновляет PR новым коммитом
-5. Цикл повторяется с шага 5 основного сценария
+   - Отправляет событие в топик `coding-events` Kafka
+4. Coding Agent (consumer):
+   - Получает событие из топика `coding-events`
+   - Получает существующий PR через GitHub API
+   - Анализирует комментарии ревьюера из PR
+   - Генерирует исправления кода
+   - Создает новый коммит с исправлениями
+   - Обновляет существующий PR новым коммитом
+5. GitHub запускает CI/CD пайплайны для обновленного PR
+6. После завершения CI/CD цикл повторяется с шага 6 основного сценария (запуск Reviewer Agent)
 
 
 
@@ -410,9 +412,9 @@ GitHub Webhooks
      - Pull requests: Read & Write
      - Metadata: Read-only
    - Webhook events:
-     - Issues
-     - Pull request review comments
-     - Check suite
+     - Issues (для обработки `issues.opened`)
+     - Pull request reviews (для обработки `pull_request_review` с state="changes_requested")
+     - Check suite (для обработки `check_suite.completed`)
 4. Установите App в нужные репозитории
 5. Сохраните App ID и сгенерируйте приватный ключ
 6. Закодируйте приватный ключ в base64: `cat private-key.pem | base64 | tr -d '\n'`

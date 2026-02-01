@@ -144,6 +144,30 @@ class GitHubAppTokenManager:
 
         return data["id"]
 
+    async def refresh_remote_token(self, repo_path: "Path", remote: str = "origin") -> None:
+        """
+        Update the remote URL with a fresh installation token.
+
+        Call this before git push to avoid expired-token errors.
+        """
+        import re
+        import git as gitpython
+
+        r = gitpython.Repo(repo_path)
+        origin_url = r.remotes[remote].url
+        match = re.match(
+            r"https://x-access-token:[^@]+@github\.com/(.+?)\.git", origin_url
+        )
+        if not match:
+            return
+
+        repo = match.group(1)
+        fresh_token = await self.get_token_for_repo(repo)
+        fresh_url = f"https://x-access-token:{
+            fresh_token}@github.com/{repo}.git"
+        r.remotes[remote].set_url(fresh_url)
+        logger.debug(f"Refreshed remote URL token for {repo}")
+
     def _create_jwt(self) -> str:
         """Create a JWT for GitHub App authentication."""
         now = int(time.time())
